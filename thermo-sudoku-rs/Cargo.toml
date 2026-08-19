@@ -1,0 +1,19 @@
+[package]
+name = "thermo-sudoku"
+version = "0.1.0"
+edition = "2024"
+description = "Capped solution counter for classic Sudoku with disjoint thermometers"
+publish = false
+
+[lib]
+name = "thermo_sudoku"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "thermo-sudoku-cli"
+path = "src/main.rs"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic = "abort"

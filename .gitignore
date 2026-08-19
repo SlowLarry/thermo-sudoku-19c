@@ -1,0 +1,7 @@
+thermo-sudoku-rs/target/
+thermo_search/__pycache__/
+runs/
+*.pyc
+AGENTS.md
+analysis/bin/
+analysis/*.exe

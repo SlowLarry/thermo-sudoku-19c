@@ -1,0 +1,704 @@
+{
+  "rangsk_executable": "SudokuSolverConsole 1.3.188 (local executable)",
+  "rangsk_version": "1.3.188",
+  "rangsk_mode": "single-threaded --check",
+  "rust_mode": "single-threaded in-process count_up_to(2)",
+  "rust_repeats_per_case": 20,
+  "rangsk_repeats_per_case": 3,
+  "case_count": 25,
+  "benchmark_wall_seconds": 105.34502950002206,
+  "groups": {
+    "blue": {
+      "cases": 1,
+      "rust_solver_median_ms": 0.9908500214805827,
+      "rangsk_solver_median_ms": 150.787,
+      "rust_wall_median_ms": 1.1331499845255166,
+      "rangsk_wall_median_ms": 1553.8859000080265,
+      "median_reported_solver_speedup": 152.17943859423423,
+      "rust_solver_total_ms": 0.9908500214805827,
+      "rangsk_solver_total_ms": 150.787
+    },
+    "score3": {
+      "cases": 14,
+      "rust_solver_median_ms": 0.13692499487660825,
+      "rangsk_solver_median_ms": 53.322900000000004,
+      "rust_wall_median_ms": 0.24202499480452389,
+      "rangsk_wall_median_ms": 1120.1740000105929,
+      "median_reported_solver_speedup": 383.21890924557056,
+      "rust_solver_total_ms": 1.9320499850437045,
+      "rangsk_solver_total_ms": 765.6600999999999
+    },
+    "spread": {
+      "cases": 10,
+      "rust_solver_median_ms": 0.21090000518597662,
+      "rangsk_solver_median_ms": 210.42714999999998,
+      "rust_wall_median_ms": 0.3337500020279549,
+      "rangsk_wall_median_ms": 1550.9799499996006,
+      "median_reported_solver_speedup": 1022.5957971823141,
+      "rust_solver_total_ms": 2.0255499839549884,
+      "rangsk_solver_total_ms": 3093.2906000000003
+    },
+    "all": {
+      "cases": 25,
+      "rust_solver_median_ms": 0.1448499970138073,
+      "rangsk_solver_median_ms": 64.351,
+      "rust_wall_median_ms": 0.2512500068405643,
+      "rangsk_wall_median_ms": 1290.5735000094865,
+      "median_reported_solver_speedup": 453.46278042950047,
+      "rust_solver_total_ms": 4.948449990479276,
+      "rangsk_solver_total_ms": 4009.7377
+    }
+  },
+  "cases": [
+    {
+      "name": "blue-20-unique",
+      "group": "blue",
+      "expected": 1,
+      "rust": {
+        "solver_ms": 0.9908500214805827,
+        "wall_ms": 1.1331499845255166,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 150.787,
+        "wall_ms": 1553.8859000080265,
+        "solver_ms_samples": [
+          148.1617,
+          241.0854,
+          150.787
+        ],
+        "wall_ms_samples": [
+          1250.233799975831,
+          1553.8859000080265,
+          1617.2279999882448
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 152.17943859423423
+    },
+    {
+      "name": "score3-line-1",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.12739999510813504,
+        "wall_ms": 0.21270000434014946,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 56.3042,
+        "wall_ms": 1385.6817999912892,
+        "solver_ms_samples": [
+          47.946299999999994,
+          57.717699999999994,
+          56.3042
+        ],
+        "wall_ms_samples": [
+          1156.4685000048485,
+          1661.7179000168107,
+          1385.6817999912892
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 441.9482116322682
+    },
+    {
+      "name": "score3-line-2",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.13744999887421727,
+        "wall_ms": 0.24435001250822097,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 54.4194,
+        "wall_ms": 998.4308000130113,
+        "solver_ms_samples": [
+          54.4194,
+          42.7372,
+          55.950199999999995
+        ],
+        "wall_ms_samples": [
+          1465.2946999995038,
+          998.4308000130113,
+          986.9538999919314
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 395.9214292158713
+    },
+    {
+      "name": "score3-line-3",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.1358500012429431,
+        "wall_ms": 0.24880000273697078,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 43.6877,
+        "wall_ms": 941.1343999963719,
+        "solver_ms_samples": [
+          43.0971,
+          63.119400000000006,
+          43.6877
+        ],
+        "wall_ms_samples": [
+          914.3030999985058,
+          1047.6573999912944,
+          941.1343999963719
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 321.5877776980838
+    },
+    {
+      "name": "score3-line-4",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.13689999468624592,
+        "wall_ms": 0.23100001271814108,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 85.3641,
+        "wall_ms": 1495.0168000068516,
+        "solver_ms_samples": [
+          85.3641,
+          56.519600000000004,
+          98.64630000000001
+        ],
+        "wall_ms_samples": [
+          1179.4449999870267,
+          1495.0168000068516,
+          1824.588900024537
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 623.5507911862348
+    },
+    {
+      "name": "score3-line-5",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.1448499970138073,
+        "wall_ms": 0.23219999275170267,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 50.7456,
+        "wall_ms": 1016.4445000118576,
+        "solver_ms_samples": [
+          50.7456,
+          50.3592,
+          50.804
+        ],
+        "wall_ms_samples": [
+          1387.737000011839,
+          1016.4445000118576,
+          999.8363999766298
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 350.33207487855776
+    },
+    {
+      "name": "score3-line-6",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.12485000479500741,
+        "wall_ms": 0.21995000133756548,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 40.7948,
+        "wall_ms": 964.1728000133298,
+        "solver_ms_samples": [
+          49.4923,
+          40.2103,
+          40.7948
+        ],
+        "wall_ms_samples": [
+          964.1728000133298,
+          952.269500005059,
+          972.3002999962773
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 326.75048805149373
+    },
+    {
+      "name": "score3-line-7",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.13419998867902905,
+        "wall_ms": 0.23990000772755593,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 60.8547,
+        "wall_ms": 1826.5836000209674,
+        "solver_ms_samples": [
+          50.134100000000004,
+          60.8547,
+          98.78729999999999
+        ],
+        "wall_ms_samples": [
+          1196.061800001189,
+          1826.5836000209674,
+          2026.6635000007227
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 453.46278042950047
+    },
+    {
+      "name": "score3-line-8",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.15025000902824104,
+        "wall_ms": 0.2512500068405643,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 64.92349999999999,
+        "wall_ms": 1016.0602999967523,
+        "solver_ms_samples": [
+          52.0899,
+          69.9485,
+          64.92349999999999
+        ],
+        "wall_ms_samples": [
+          1003.0434000073001,
+          1016.0602999967523,
+          1034.3356000084896
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 432.10313543340254
+    },
+    {
+      "name": "score3-line-9",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.1283999881707132,
+        "wall_ms": 0.2252500125905499,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 47.5743,
+        "wall_ms": 1153.2422000018414,
+        "solver_ms_samples": [
+          47.349799999999995,
+          47.5743,
+          81.87429999999999
+        ],
+        "wall_ms_samples": [
+          1028.5544999933336,
+          1153.2422000018414,
+          1353.0988999991678
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 370.5163892752698
+    },
+    {
+      "name": "score3-line-10",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.16005001089069992,
+        "wall_ms": 0.2709499967750162,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 52.2264,
+        "wall_ms": 1339.8188000137452,
+        "solver_ms_samples": [
+          52.2264,
+          52.3218,
+          51.762299999999996
+        ],
+        "wall_ms_samples": [
+          1339.8188000137452,
+          1433.319500007201,
+          1248.216300009517
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 326.313004974839
+    },
+    {
+      "name": "score3-line-11",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.14214999100659043,
+        "wall_ms": 0.2582000015536323,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 46.8187,
+        "wall_ms": 994.0411999996286,
+        "solver_ms_samples": [
+          47.3655,
+          40.4488,
+          46.8187
+        ],
+        "wall_ms_samples": [
+          917.0061000040732,
+          994.0411999996286,
+          1005.4610000224784
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 329.3612589664488
+    },
+    {
+      "name": "score3-line-12",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.13105000834912062,
+        "wall_ms": 0.2305999951204285,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 60.0407,
+        "wall_ms": 1179.8297999775968,
+        "solver_ms_samples": [
+          60.0407,
+          80.8759,
+          59.5887
+        ],
+        "wall_ms_samples": [
+          1010.5477999895811,
+          1179.8297999775968,
+          2436.122399987653
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 458.15105818269024
+    },
+    {
+      "name": "score3-line-13",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.1369499950669706,
+        "wall_ms": 0.251150006079115,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 56.6097,
+        "wall_ms": 1370.8053000154905,
+        "solver_ms_samples": [
+          166.7977,
+          56.6097,
+          51.8624
+        ],
+        "wall_ms_samples": [
+          2354.292300005909,
+          1370.8053000154905,
+          1098.5568999894895
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 413.36036538239387
+    },
+    {
+      "name": "score3-line-14",
+      "group": "score3",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.14170000213198364,
+        "wall_ms": 0.24414998188149184,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 45.296299999999995,
+        "wall_ms": 1087.1058000193443,
+        "solver_ms_samples": [
+          39.3016,
+          45.296299999999995,
+          62.1365
+        ],
+        "wall_ms_samples": [
+          1087.1058000193443,
+          997.263600002043,
+          1294.0634000115097
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 319.6633685143467
+    },
+    {
+      "name": "spread-line-15-count-4",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.1369499950669706,
+        "wall_ms": 0.23580000561196357,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 64.351,
+        "wall_ms": 1552.0781000086572,
+        "solver_ms_samples": [
+          65.2669,
+          64.351,
+          45.3951
+        ],
+        "wall_ms_samples": [
+          1648.2033999927808,
+          1552.0781000086572,
+          1150.5719000124373
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 469.88683693293603
+    },
+    {
+      "name": "spread-line-137-count-24",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.2109500055667013,
+        "wall_ms": 0.3338000096846372,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 129.38469999999998,
+        "wall_ms": 1290.5735000094865,
+        "solver_ms_samples": [
+          124.96740000000001,
+          129.38469999999998,
+          133.2256
+        ],
+        "wall_ms_samples": [
+          1186.3510999828577,
+          1290.5735000094865,
+          1295.8861000079196
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 613.342956082972
+    },
+    {
+      "name": "spread-line-259-count-36",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.18894999811891466,
+        "wall_ms": 0.29490000451914966,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 231.9786,
+        "wall_ms": 1681.3782000099309,
+        "solver_ms_samples": [
+          231.9786,
+          246.5563,
+          201.1549
+        ],
+        "wall_ms_samples": [
+          1681.3782000099309,
+          2550.46030000085,
+          1504.2449999891687
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 1227.7248071418637
+    },
+    {
+      "name": "spread-line-381-count-47",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.23710000095888972,
+        "wall_ms": 0.3846000035991892,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 176.2412,
+        "wall_ms": 1243.7162999995053,
+        "solver_ms_samples": [
+          124.1341,
+          176.2412,
+          244.1729
+        ],
+        "wall_ms_samples": [
+          1065.0237000081688,
+          1243.7162999995053,
+          1627.7696999895852
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 743.3201150874651
+    },
+    {
+      "name": "spread-line-503-count-58",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.21085000480525196,
+        "wall_ms": 0.3336999943712726,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 350.2806,
+        "wall_ms": 1881.7463000013959,
+        "solver_ms_samples": [
+          203.4225,
+          431.35790000000003,
+          350.2806
+        ],
+        "wall_ms_samples": [
+          1228.1701000174507,
+          1944.1999999980908,
+          1881.7463000013959
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 1661.2785962396858
+    },
+    {
+      "name": "spread-line-626-count-70",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.23104999854695052,
+        "wall_ms": 0.3641500079538673,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 188.8757,
+        "wall_ms": 1253.4992000146303,
+        "solver_ms_samples": [
+          178.22379999999998,
+          204.83689999999999,
+          188.8757
+        ],
+        "wall_ms_samples": [
+          1580.9570999990683,
+          1253.4992000146303,
+          1207.1444999892265
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 817.4667872227643
+    },
+    {
+      "name": "spread-line-748-count-78",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.20464998669922352,
+        "wall_ms": 0.298099999781698,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 717.354,
+        "wall_ms": 2186.0064000065904,
+        "solver_ms_samples": [
+          480.1417,
+          717.354,
+          789.4454
+        ],
+        "wall_ms_samples": [
+          1699.105999985477,
+          2524.5711999887135,
+          2186.0064000065904
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 3505.272644138031
+    },
+    {
+      "name": "spread-line-870-count-86",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.21334999473765492,
+        "wall_ms": 0.3357999958097935,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 142.7231,
+        "wall_ms": 1105.314600019483,
+        "solver_ms_samples": [
+          146.0214,
+          131.6021,
+          142.7231
+        ],
+        "wall_ms_samples": [
+          1314.059600001201,
+          1056.7108999821357,
+          1105.314600019483
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 668.9622850729336
+    },
+    {
+      "name": "spread-line-992-count-95",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.2132499939762056,
+        "wall_ms": 0.33429999893996865,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 576.0927,
+        "wall_ms": 1885.0459000095725,
+        "solver_ms_samples": [
+          576.0927,
+          499.8901,
+          696.0222
+        ],
+        "wall_ms_samples": [
+          1556.939500005683,
+          1885.0459000095725,
+          2457.089100003941
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 2701.4898770139257
+    },
+    {
+      "name": "spread-line-1258-count-470",
+      "group": "spread",
+      "expected": 2,
+      "rust": {
+        "solver_ms": 0.17845000547822565,
+        "wall_ms": 0.30595000134781003,
+        "repeats": 20
+      },
+      "rangsk": {
+        "solver_ms": 516.009,
+        "wall_ms": 1549.881799990544,
+        "solver_ms_samples": [
+          713.9984000000001,
+          467.64820000000003,
+          516.009
+        ],
+        "wall_ms_samples": [
+          1829.2538000096101,
+          1372.2306999843568,
+          1549.881799990544
+        ],
+        "repeats": 3
+      },
+      "reported_solver_speedup": 2891.616610586
+    }
+  ]
+}
