@@ -82,8 +82,33 @@ emits a deterministic SAT master for every non-overlapping thermometer union
 covering at most 19 cells, validates and decodes complete SAT models, and can
 run a bounded CaDiCaL-compatible CEGIS loop using the exact Rust thermo oracle.
 Every multiple candidate adds a validated solution-pair cut to both the CNF
-and a standard checkpoint. See `analysis/topology-sat-pilot.md` for the first
-full-scale run and the planned LRAT certificate path.
+and a standard checkpoint. Its `incremental-loop` mode uses the persistent
+CaDiCaL bridge in `tools/`, exact batched solution enumeration, `all` or
+`anchor` pair learning, atomic checkpoint replacement, optional phase hints,
+an optional versioned D4-times-complement symmetry breaker, allocation-free
+bitset validation of retained cuts, and per-stage timing. Its exact lazy-cut
+mode keeps the complete cut pool in Rust while loading only a small witnessed
+active subset into CaDiCaL, scans the full pool before every oracle call, and
+regenerates the terminal base-plus-active proof CNF from an atomic manifest.
+Large checkpoints are parsed as a stream. Stored solution pairs use an exact
+four-bit-per-digit representation, while compact `u32` probe tables reference
+the canonical pair and cut vectors; every hash collision is resolved by full
+key equality, so hashes are an accelerator rather than evidence. The external
+checkpoint, manifest, CNF, FNV, and first-witness formats are unchanged.
+Eager continuation reserve is capped, with larger runs growing in bounded
+record chunks rather than allocating their full theoretical maximum up front.
+Lazy activations are durably batched with the pair checkpoint, ordered
+checkpoint-before-manifest so every crash restart sees compatible prefixes;
+checkpoint write counts and timings are reported separately. See
+`analysis/topology-sat-pilot.md` for the completed bounded full-scale runs,
+artifact hashes, and independent formula audit, and `tools/README.md` for
+bridge build/run instructions and the separate LRAT certificate path.
+The current validated state follows ten completed 1,000-iteration runs plus
+556 additional refinement batches: 22,846,872 solution pairs and 20,872,205
+unique cuts, with neither a unique candidate nor UNSAT reached. The final
+large checkpoint was reread by the independent `stats` path; the most recent
+trio has not been rerun through the substantially more memory-intensive
+cross-language Python verifier.
 
 Counts use a limit of at least two. Reaching the limit is reported as a lower
 bound; a count below it is exact. The Rust API retains the first two witness

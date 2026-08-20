@@ -1,10 +1,13 @@
-# Quick Rust versus Rangsk benchmark
+# Solver benchmarks
 
 Related comparisons:
 
+- [Rangsk's native .NET solver](NATIVE_RANGSK.md) — the primary Rangsk comparison
 - [Interactive Sudoku Solver](ISS.md)
-- [Rangsk's .NET WebAssembly prototype](WASM_RANGSK.md)
+- [Rangsk's .NET WebAssembly prototype](WASM_RANGSK.md) — retained to quantify the WASM host penalty
 - [Hybrid all-two-cell extension screen](TWO_CELL_SCREEN.md)
+
+## Legacy cold-console comparison
 
 Run on 2026-08-19 with:
 
@@ -35,10 +38,10 @@ Rust and fresh .NET process launch plus JSON I/O for Rangsk.
 
 The aggregate speedup is the ratio of the sums of the per-layout median solver
 durations, not a ratio of the displayed overall medians. Rangsk's wall time is
-dominated by cold process startup, so the 810x solver-duration comparison is
-the useful headline for this quick run. Its JSON timer may still include some
-per-process JIT work; a persistent `--listen` benchmark would be needed to
-remove that completely.
+dominated by cold process startup, and its JSON timer may include per-process
+JIT work. The 810x figure is therefore retained only as historical data; the
+persistent native benchmark linked above supersedes it as the engine
+comparison.
 
 Reproduce with:
 

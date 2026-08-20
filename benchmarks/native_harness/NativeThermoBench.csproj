@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>NativeThermoBench</AssemblyName>
+    <RootNamespace>NativeThermoBench</RootNamespace>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <SudokuSolverProject Condition="'$(SudokuSolverProject)' == ''">..\..\SudokuSolver\SudokuSolver.csproj</SudokuSolverProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(SudokuSolverProject)" />
+  </ItemGroup>
+
+</Project>

@@ -5,3 +5,5 @@ runs/
 AGENTS.md
 analysis/bin/
 analysis/*.exe
+benchmarks/native_harness/bin/
+benchmarks/native_harness/obj/
