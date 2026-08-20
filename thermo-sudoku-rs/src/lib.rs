@@ -246,6 +246,20 @@ pub struct SolveResult {
     pub stats: SolveStats,
 }
 
+/// An exact prefix of the complete solutions for one fixed problem.
+///
+/// When `exhausted` is true, `solutions` contains every solution. When
+/// `capped` is true, search found one additional solution beyond the returned
+/// prefix and stopped, so more solutions exist. The two flags are always
+/// complements.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SolutionBatch {
+    pub solutions: Vec<[u8; 81]>,
+    pub exhausted: bool,
+    pub capped: bool,
+    pub stats: SolveStats,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Multiplicity {
     Zero,
@@ -619,6 +633,29 @@ impl Solver {
         self.count_up_to_internal(limit, true)
     }
 
+    /// Return at most `limit` distinct complete solutions.
+    ///
+    /// Search continues after filling the batch until it either exhausts the
+    /// remaining tree or finds one additional solution. Consequently a batch
+    /// containing exactly `limit` solutions can still report `exhausted`.
+    pub fn enumerate_up_to(&self, limit: usize) -> SolutionBatch {
+        assert!(limit > 0, "solution batch limit must be positive");
+        let mut result = SolutionBatch {
+            solutions: Vec::with_capacity(limit.min(1024)),
+            exhausted: true,
+            capped: false,
+            stats: SolveStats::default(),
+        };
+        let Some((state, work)) = self.initial_search_state() else {
+            return result;
+        };
+
+        let mut cell_order = std::array::from_fn(|cell| cell as u8);
+        result.exhausted = self.search_batch(state, work, limit, 0, &mut result, &mut cell_order);
+        result.capped = !result.exhausted;
+        result
+    }
+
     /// Classify every directed king-neighbour two-cell thermometer that is
     /// disjoint from the current layout. A short collective prefix supplies
     /// witnesses for common edges, then unresolved edges are classified
@@ -806,6 +843,47 @@ impl Solver {
                 self.search(child, child_work, options, depth + 1, result, cell_order);
             }
         }
+    }
+
+    /// Returns true when the complete subtree was exhausted. A false result
+    /// means an additional solution beyond the requested batch was found.
+    fn search_batch(
+        &self,
+        mut state: [u16; 81],
+        mut work: Work,
+        limit: usize,
+        depth: u8,
+        result: &mut SolutionBatch,
+        cell_order: &mut [u8; 81],
+    ) -> bool {
+        result.stats.nodes += 1;
+        result.stats.max_depth = result.stats.max_depth.max(depth);
+        if !self.propagate(&mut state, &mut work, &mut result.stats) {
+            return true;
+        }
+
+        let Some(cell) = choose_branch_cell(&state, &self.layout, cell_order) else {
+            if result.solutions.len() == limit {
+                return false;
+            }
+            result.solutions.push(masks_to_solution(&state));
+            return true;
+        };
+
+        result.stats.branches += 1;
+        let mut choices = state[cell];
+        while choices != 0 {
+            let value = low_bit(choices);
+            choices &= choices - 1;
+            let mut child = state;
+            let mut child_work = Work::default();
+            if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value)
+                && !self.search_batch(child, child_work, limit, depth + 1, result, cell_order)
+            {
+                return false;
+            }
+        }
+        true
     }
 
     /// Returns true when the complete subtree was exhausted, or false when
@@ -1950,6 +2028,50 @@ mod tests {
         let counted = solver.count_up_to(4);
         assert_eq!(counted.count, 3);
         assert!(!counted.capped);
+    }
+
+    #[test]
+    fn enumeration_exhausts_blue_with_its_unique_valid_solution() {
+        let layout = paths(BLUE_20);
+        let batch = Solver::blank(&layout).unwrap().enumerate_up_to(2);
+
+        assert_eq!(batch.solutions.len(), 1);
+        assert!(batch.exhausted);
+        assert!(!batch.capped);
+        assert!(batch.stats.nodes > 0);
+        assert_solution_satisfies(&batch.solutions[0], &layout);
+    }
+
+    #[test]
+    fn enumeration_returns_all_known_three_solutions_distinct_and_valid() {
+        let layout = paths(KNOWN_THREE);
+        let batch = Solver::blank(&layout).unwrap().enumerate_up_to(3);
+
+        assert_eq!(batch.solutions.len(), 3);
+        assert!(batch.exhausted);
+        assert!(!batch.capped);
+        for solution in &batch.solutions {
+            assert_solution_satisfies(solution, &layout);
+        }
+        for left in 0..batch.solutions.len() {
+            for right in left + 1..batch.solutions.len() {
+                assert_ne!(batch.solutions[left], batch.solutions[right]);
+            }
+        }
+    }
+
+    #[test]
+    fn enumeration_reports_a_cap_only_after_finding_an_extra_solution() {
+        let solver = Solver::blank(&paths(KNOWN_THREE)).unwrap();
+        let capped = solver.enumerate_up_to(2);
+        assert_eq!(capped.solutions.len(), 2);
+        assert!(!capped.exhausted);
+        assert!(capped.capped);
+
+        let exact = solver.enumerate_up_to(3);
+        assert_eq!(exact.solutions.len(), 3);
+        assert!(exact.exhausted);
+        assert!(!exact.capped);
     }
 
     #[test]

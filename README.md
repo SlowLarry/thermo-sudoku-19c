@@ -87,8 +87,14 @@ The `thermo-topology-cnf` binary turns the pair checkpoint into a deterministic
 SAT master for the actual geometry: a cell-disjoint union of directed paths
 covering at most 19 cells. It validates and decodes SAT models, calls the exact
 Rust thermo oracle, and appends one checkable solution-pair cut for every
-multiple candidate. The first thirteen full-scale candidates were all
-multiple; the master remains satisfiable and the problem remains open. The
+multiple candidate. Its persistent CaDiCaL mode instead learns batched
+all-pair or anchor-pair cuts without restarting the SAT solver. The first
+thirteen full-scale candidates were all multiple. Ten completed
+1,000-iteration lazy runs, plus 556 additional validated refinement batches,
+have now grown the corpus to 22,846,872 solution pairs and 20,872,205 unique
+cuts. Every completed segment stopped at its configured iteration limit
+without finding a unique candidate or reaching UNSAT; the problem remains
+open. The
 encoding, full-scale run, hashes, and proof-verification path are recorded in
 `analysis/topology-sat-pilot.md`.
 
@@ -97,8 +103,10 @@ interface only accepts unary cell restrictions and cannot express a
 thermometer's binary ordering constraints. This project therefore does not call
 Tdoku and filter its solutions. No Tdoku source code has been copied here.
 
-The first reproducible comparison with Rangsk SudokuSolverConsole is in
-`benchmarks/README.md`, with the complete per-case JSON alongside it.
+The primary reproducible comparison with Rangsk's native Release solver is in
+[`benchmarks/NATIVE_RANGSK.md`](benchmarks/NATIVE_RANGSK.md), with complete raw
+per-case samples alongside it. The older console and WebAssembly measurements
+remain linked from [`benchmarks/README.md`](benchmarks/README.md).
 
 ## Source notes and acknowledgement
 

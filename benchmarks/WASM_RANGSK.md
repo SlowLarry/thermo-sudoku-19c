@@ -1,5 +1,9 @@
 # Rust versus Rangsk .NET WebAssembly prototype
 
+> The native Release comparison in [NATIVE_RANGSK.md](NATIVE_RANGSK.md) is the
+> primary solver comparison. This page is retained to measure the additional
+> WebAssembly host cost.
+
 Run on 2026-08-19 with:
 
 - Intel Core i5-6500, four logical processors;
