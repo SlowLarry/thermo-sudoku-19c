@@ -1,0 +1,23 @@
+{
+  "schema": "thermo-score3-one-edge-neighborhood-v1",
+  "date": "2026-08-20",
+  "model": "classic-sudoku-plus-16-directed-king-comparisons",
+  "base": "first-score-3-9+8+2",
+  "base_exact_solution_count": 3,
+  "oracle": {
+    "repository": "https://github.com/sigh/Interactive-Sudoku-Solver",
+    "revision": "c43bfb867baa0f9c12c087afe912d626ac13a77a",
+    "node": "v22.18.0",
+    "cap": 2
+  },
+  "universe_directed_edges": 544,
+  "base_edges": 16,
+  "removed_edges_per_candidate": 1,
+  "added_edges_per_candidate": 1,
+  "tested": 8448,
+  "unsatisfiable": 722,
+  "unique": 0,
+  "multiple": 7726,
+  "elapsed_seconds": 13.8125462,
+  "scope": "complete-one-edge-replacement-neighborhood-only"
+}

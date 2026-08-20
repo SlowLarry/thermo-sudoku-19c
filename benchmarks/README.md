@@ -1,5 +1,11 @@
 # Quick Rust versus Rangsk benchmark
 
+Related comparisons:
+
+- [Interactive Sudoku Solver](ISS.md)
+- [Rangsk's .NET WebAssembly prototype](WASM_RANGSK.md)
+- [Hybrid all-two-cell extension screen](TWO_CELL_SCREEN.md)
+
 Run on 2026-08-19 with:
 
 - Intel Core i5-6500, four logical processors;

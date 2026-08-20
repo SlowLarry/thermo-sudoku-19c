@@ -361,7 +361,6 @@ class RustSolver:
             offsets.append(offsets[-1] + len(path))
         cells_array = (ctypes.c_uint8 * max(1, len(flat)))(*(flat or [0]))
         offsets_array = (ctypes.c_uint16 * len(offsets))(*offsets)
-        solution_array = (ctypes.c_uint8 * 81)()
 
         started = time.perf_counter()
         count = int(
@@ -371,7 +370,7 @@ class RustSolver:
                 offsets_array,
                 len(normalized),
                 cap,
-                solution_array,
+                None,
             )
         )
         duration = time.perf_counter() - started

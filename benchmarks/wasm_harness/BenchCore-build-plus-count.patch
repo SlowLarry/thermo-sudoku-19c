@@ -1,0 +1,21 @@
+diff --git a/benchmarks/SudokuSolverBenchmark/BenchCore.cs b/benchmarks/SudokuSolverBenchmark/BenchCore.cs
+index a319c60..94226bc 100644
+--- a/benchmarks/SudokuSolverBenchmark/BenchCore.cs
++++ b/benchmarks/SudokuSolverBenchmark/BenchCore.cs
+@@ -63,7 +63,4 @@ internal static class BenchCore
+         for (int i = 0; i < iterations; i++)
+         {
+-            // A fresh solver each iteration: FindSolution mutates the board, and a clean start
+-            // keeps allocation measurement honest.
+-            Solver solver = Build(c);
+             GC.Collect();
+             GC.WaitForPendingFinalizers();
+@@ -71,5 +68,8 @@ internal static class BenchCore
+             long before = GC.GetTotalAllocatedBytes(precise: true);
+             stopwatch.Restart();
++            // This local benchmark variant deliberately includes a fresh build because every
++            // thermo-search proposal changes the constraint geometry.
++            Solver solver = Build(c);
+             result = RunOp(solver, c, forceMultiThread);
+             stopwatch.Stop();
+             allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - before;

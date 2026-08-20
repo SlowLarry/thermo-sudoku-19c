@@ -1,0 +1,227 @@
+[
+  {
+    "Name": "blue-20-unique",
+    "Op": "count",
+    "Result": 1,
+    "Ok": true,
+    "MinMs": 1.0442,
+    "MedianMs": 1.3923,
+    "AllocMB": 0.272352
+  },
+  {
+    "Name": "score3-line-1",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.5042,
+    "MedianMs": 1.065,
+    "AllocMB": 0.256824
+  },
+  {
+    "Name": "score3-line-2",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3844,
+    "MedianMs": 0.5612,
+    "AllocMB": 0.256824
+  },
+  {
+    "Name": "score3-line-3",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3498,
+    "MedianMs": 0.5223,
+    "AllocMB": 0.25684
+  },
+  {
+    "Name": "score3-line-4",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3431,
+    "MedianMs": 0.4778,
+    "AllocMB": 0.254824
+  },
+  {
+    "Name": "score3-line-5",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3606,
+    "MedianMs": 0.4966,
+    "AllocMB": 0.254824
+  },
+  {
+    "Name": "score3-line-6",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3357,
+    "MedianMs": 0.477,
+    "AllocMB": 0.25484
+  },
+  {
+    "Name": "score3-line-7",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3338,
+    "MedianMs": 0.4976,
+    "AllocMB": 0.25484
+  },
+  {
+    "Name": "score3-line-8",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3463,
+    "MedianMs": 0.5049,
+    "AllocMB": 0.259272
+  },
+  {
+    "Name": "score3-line-9",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3423,
+    "MedianMs": 0.4464,
+    "AllocMB": 0.259272
+  },
+  {
+    "Name": "score3-line-10",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3439,
+    "MedianMs": 0.5001,
+    "AllocMB": 0.259288
+  },
+  {
+    "Name": "score3-line-11",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3404,
+    "MedianMs": 0.5125,
+    "AllocMB": 0.254824
+  },
+  {
+    "Name": "score3-line-12",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3383,
+    "MedianMs": 0.4274,
+    "AllocMB": 0.254824
+  },
+  {
+    "Name": "score3-line-13",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.333,
+    "MedianMs": 0.4461,
+    "AllocMB": 0.25484
+  },
+  {
+    "Name": "score3-line-14",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3366,
+    "MedianMs": 0.4273,
+    "AllocMB": 0.25484
+  },
+  {
+    "Name": "spread-line-15-count-4",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.316,
+    "MedianMs": 0.4075,
+    "AllocMB": 0.255464
+  },
+  {
+    "Name": "spread-line-137-count-24",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3842,
+    "MedianMs": 0.491,
+    "AllocMB": 0.280128
+  },
+  {
+    "Name": "spread-line-259-count-36",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.4051,
+    "MedianMs": 0.5439,
+    "AllocMB": 0.276088
+  },
+  {
+    "Name": "spread-line-381-count-47",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.373,
+    "MedianMs": 0.5259,
+    "AllocMB": 0.275296
+  },
+  {
+    "Name": "spread-line-503-count-58",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.5774,
+    "MedianMs": 0.7548,
+    "AllocMB": 0.334656
+  },
+  {
+    "Name": "spread-line-626-count-70",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3789,
+    "MedianMs": 0.5015,
+    "AllocMB": 0.263496
+  },
+  {
+    "Name": "spread-line-748-count-78",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.3464,
+    "MedianMs": 0.4827,
+    "AllocMB": 0.279032
+  },
+  {
+    "Name": "spread-line-870-count-86",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.37,
+    "MedianMs": 0.5111,
+    "AllocMB": 0.271944
+  },
+  {
+    "Name": "spread-line-992-count-95",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.415,
+    "MedianMs": 0.5484,
+    "AllocMB": 0.270928
+  },
+  {
+    "Name": "spread-line-1258-count-470",
+    "Op": "count",
+    "Result": 2,
+    "Ok": true,
+    "MinMs": 0.4009,
+    "MedianMs": 0.5028,
+    "AllocMB": 0.278056
+  }
+]

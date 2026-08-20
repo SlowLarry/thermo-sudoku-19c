@@ -1,0 +1,227 @@
+[
+  {
+    "name": "blue-20-unique",
+    "op": "count",
+    "result": 1,
+    "ok": true,
+    "minMs": 1.2704,
+    "medianMs": 2.3708,
+    "allocMB": 0.249864
+  },
+  {
+    "name": "score3-line-1",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0796,
+    "medianMs": 1.5067,
+    "allocMB": 0.235104
+  },
+  {
+    "name": "score3-line-2",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0959,
+    "medianMs": 1.3005,
+    "allocMB": 0.235104
+  },
+  {
+    "name": "score3-line-3",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0708,
+    "medianMs": 1.3963,
+    "allocMB": 0.23512
+  },
+  {
+    "name": "score3-line-4",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0552,
+    "medianMs": 1.3638,
+    "allocMB": 0.233552
+  },
+  {
+    "name": "score3-line-5",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0187,
+    "medianMs": 1.27,
+    "allocMB": 0.233552
+  },
+  {
+    "name": "score3-line-6",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0136,
+    "medianMs": 1.3422,
+    "allocMB": 0.233568
+  },
+  {
+    "name": "score3-line-7",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0467,
+    "medianMs": 1.2911,
+    "allocMB": 0.233568
+  },
+  {
+    "name": "score3-line-8",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0685,
+    "medianMs": 1.2294,
+    "allocMB": 0.236952
+  },
+  {
+    "name": "score3-line-9",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0391,
+    "medianMs": 1.3424,
+    "allocMB": 0.236952
+  },
+  {
+    "name": "score3-line-10",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0696,
+    "medianMs": 1.4296,
+    "allocMB": 0.236968
+  },
+  {
+    "name": "score3-line-11",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.044,
+    "medianMs": 1.3208,
+    "allocMB": 0.233552
+  },
+  {
+    "name": "score3-line-12",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0483,
+    "medianMs": 1.262,
+    "allocMB": 0.233552
+  },
+  {
+    "name": "score3-line-13",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0437,
+    "medianMs": 1.3353,
+    "allocMB": 0.233568
+  },
+  {
+    "name": "score3-line-14",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0549,
+    "medianMs": 1.3012,
+    "allocMB": 0.233568
+  },
+  {
+    "name": "spread-line-15-count-4",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 0.9796,
+    "medianMs": 1.1345,
+    "allocMB": 0.234064
+  },
+  {
+    "name": "spread-line-137-count-24",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.2065,
+    "medianMs": 1.5244,
+    "allocMB": 0.254896
+  },
+  {
+    "name": "spread-line-259-count-36",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.221,
+    "medianMs": 1.4508,
+    "allocMB": 0.252568
+  },
+  {
+    "name": "spread-line-381-count-47",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.1619,
+    "medianMs": 1.5606,
+    "allocMB": 0.251528
+  },
+  {
+    "name": "spread-line-503-count-58",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.9543,
+    "medianMs": 2.6397,
+    "allocMB": 0.297496
+  },
+  {
+    "name": "spread-line-626-count-70",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.1453,
+    "medianMs": 1.486,
+    "allocMB": 0.241296
+  },
+  {
+    "name": "spread-line-748-count-78",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.0293,
+    "medianMs": 1.2969,
+    "allocMB": 0.256336
+  },
+  {
+    "name": "spread-line-870-count-86",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.1436,
+    "medianMs": 1.592,
+    "allocMB": 0.248944
+  },
+  {
+    "name": "spread-line-992-count-95",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.3548,
+    "medianMs": 1.8286,
+    "allocMB": 0.247832
+  },
+  {
+    "name": "spread-line-1258-count-470",
+    "op": "count",
+    "result": 2,
+    "ok": true,
+    "minMs": 1.2713,
+    "medianMs": 1.8103,
+    "allocMB": 0.255048
+  }
+]

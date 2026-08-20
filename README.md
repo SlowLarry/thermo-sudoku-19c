@@ -32,25 +32,70 @@ The last command intentionally exits nonzero for the supplied file because it
 detects the overlapping record on line 1192; its summary should still show
 `matched: 1279` and `mismatched: 0`.
 
-The Rust implementation is deliberately scalar and auditable at this stage.
-Each thermometer is propagated as the full table of its possible increasing
-digit sequences. It serves as the correctness oracle for later profiling,
-batch APIs, pair-cut search, and any Tdoku-inspired SIMD backend.
+The Rust implementation is specialized and auditable: 9-bit candidate domains,
+an event-driven propagation queue, bit-parallel house checks, thermo-aware
+branch ordering, and exact forward/backward propagation along each increasing
+path. It also has an exact hybrid batch screen that fixes a base layout once,
+shares solution witnesses among all legal two-cell extensions, and finishes
+only the unresolved extensions independently.
 
 The supplied corpus currently gives 1,279 exact count matches and one geometry
 rejection: line 1192 shares cell 60 between two thermometers. No source record
 is modified.
 
-## Performance direction
+## Exact 9+8+2 pilot
 
-Tdoku is a useful architecture reference, but its public pencilmark interface
-only accepts unary cell restrictions and cannot express a thermometer's binary
-ordering constraints. This project therefore does not call Tdoku and filter its
-solutions. The next native milestone is a batch operation that fixes a 9+8
-base once and classifies every legal two-cell extension together. If profiling
-then warrants it, the Sudoku propagation layer can adopt Tdoku-style
-box/triad and band-configuration propagation while this scalar implementation
-remains the independent oracle. No Tdoku source code has been copied here.
+The first symmetry-reduced native shard classified 99,389,208 directed
+two-cell extensions across 257,776 canonical 9+8 bases. It found no unique
+19-cell puzzle in that shard. The exact result, reproduction command, and scope
+are recorded in `analysis/9x8-pilot.md`. Batch witness output can be checked
+without trusting the solver by `analysis/verify_two_cell_certificate.py`.
+
+The measured scale also confirms that direct base-by-base enumeration is not a
+credible hobby-resource route to a global exclusion. This motivated the
+trade-cut CEGIS and symbolic master for the relaxed sixteen-comparison problem
+described below. A negative result for that relaxation would exclude every
+disjoint thermometer layout covering at most 19 cells, regardless of its
+length partition.
+
+## Fixed-target symbolic pilot
+
+The `thermo-fixed-target` binary implements the first relaxed trade-cut CEGIS
+stage for one chosen solved grid. It alternates a hitting-set master with an
+exact classic-Sudoku oracle over arbitrary, possibly overlapping
+king-neighbour comparisons. Its restartable pilot reached 2,983,306 explicit
+alternative grids. A structural adjacent-digit-swap argument now certifies a
+fixed-target lower bound of eight; the saved alternatives plus those seeds
+still admit an 11-comparison hitting set. It therefore makes no fixed-target or
+global exclusion claim. The precise scope, checkpoint hash, and next
+target-free step are recorded in `analysis/fixed-target-pilot.md`.
+
+## Target-free relaxed-16 pilot
+
+The `thermo-global-cegis` binary implements the target-free relaxation: an
+unknown Sudoku witness, 544 possible directed king-neighbour comparisons, a
+joint exact hitting-set/Sudoku master, and an exact batched second-solution
+checker. Its persisted pilot corpus contains 578,392 independently validated
+solution pairs. No unique 16-comparison set was found, but the master search
+was not exhausted, so this is not a 19-cell exclusion. The formulation,
+commands, hashes, checkpoints, and present scaling boundary are recorded in
+`analysis/global-cegis-pilot.md` and `analysis/target-free-cegis-design.md`.
+
+## Non-overlapping topology SAT pilot
+
+The `thermo-topology-cnf` binary turns the pair checkpoint into a deterministic
+SAT master for the actual geometry: a cell-disjoint union of directed paths
+covering at most 19 cells. It validates and decodes SAT models, calls the exact
+Rust thermo oracle, and appends one checkable solution-pair cut for every
+multiple candidate. The first thirteen full-scale candidates were all
+multiple; the master remains satisfiable and the problem remains open. The
+encoding, full-scale run, hashes, and proof-verification path are recorded in
+`analysis/topology-sat-pilot.md`.
+
+Tdoku remains a useful architecture reference, but its public pencilmark
+interface only accepts unary cell restrictions and cannot express a
+thermometer's binary ordering constraints. This project therefore does not call
+Tdoku and filter its solutions. No Tdoku source code has been copied here.
 
 The first reproducible comparison with Rangsk SudokuSolverConsole is in
 `benchmarks/README.md`, with the complete per-case JSON alongside it.
