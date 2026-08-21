@@ -32,10 +32,20 @@ The current exporter writes schema `thermo-topology-cnf-v2`. The optional
 `--symmetry-break d4-complement-v1` mode adds 148 clauses and no variables;
 `none` remains the default and the selected mode is recorded in the header.
 
-The binary provides six modes:
+The opt-in `--topology-scope exact-9+8+2` formula adds three component labels,
+exact label sizes 9, 8, and 2, and exactly three path sources.  Together with
+the generic indegree/outdegree and acyclicity constraints this forces exactly
+one directed path of each requested length.  It has 9,656 variables and
+69,959 structural clauses before pair cuts (70,107 with the same symmetry
+breaker).  The default `at-most-19` CNF remains byte-stable, and scoped lazy
+manifests cannot be loaded into the other formula.
+
+The binary also validates and merges global pair checkpoints:
 
 ```text
 thermo-topology-cnf stats  --checkpoint PAIRS
+thermo-topology-cnf merge-checkpoints --checkpoint BASE \
+  --merge-checkpoint GUIDED --output MERGED
 thermo-topology-cnf emit   --checkpoint PAIRS --output MASTER.cnf
 thermo-topology-cnf emit-active --checkpoint PAIRS \
   --active-cuts ACTIVE --output ACTIVE.cnf
@@ -48,8 +58,15 @@ thermo-topology-cnf incremental-loop --checkpoint PAIRS \
   --cnf MASTER.cnf --max-iterations N --oracle-batch 32 \
   --pair-mode all --checkpoint-every 10 --prefer-selected \
   --lazy-cuts ACTIVE --lazy-violation-batch 256 \
-  --symmetry-break d4-complement-v1
+  --symmetry-break d4-complement-v1 \
+  --topology-scope exact-9+8+2
 ```
+
+`merge-checkpoints` preserves the validated base file as an exact prefix,
+appends only new canonical solution pairs, and retains the first pair witness
+for every deduplicated cut.  This is how deterministic gradient runs can feed
+fully enumerated solution pairs into the exact master without treating their
+scores as proof evidence.
 
 `decode` checks the complete SAT model against the Sudoku, topology, coverage,
 swap, and retained pair clauses before emitting paths. In `loop`, every SAT
@@ -382,7 +399,9 @@ not end-to-end time under this checkpoint cadence.
 
 This run also ended only at its configured iteration limit. It found no unique
 thermometer construction, did not reach UNSAT, and produced no LRAT proof. The
-19-cell question therefore remains open.
+topology/exclusion run therefore remained inconclusive. A later guided search
+found an independently verified unique 19-cell 9+8+2 construction, documented
+in `analysis/unique-19c-9x8x2-2026-08-21.md`.
 
 ## Three further completed continuations (`f`, `g`, and `h`)
 
@@ -476,7 +495,9 @@ at this corpus size. The common edge-order FNV was `f12501e5f1df08d5`.
 
 None of `f`, `g`, or `h` found a unique thermometer construction or reached
 UNSAT, and no LRAT proof was produced. Formula provenance is independently
-checked; proof certification is not. The 19-cell question remains open.
+checked; proof certification is not. These topology runs remained
+inconclusive; the existence question was subsequently resolved positively by
+the guided construction in `analysis/unique-19c-9x8x2-2026-08-21.md`.
 
 ## Two-hour continuation from `h` (`i` through `o`)
 
@@ -596,15 +617,18 @@ completed segment reached its iteration limit without testing its terminal
 refinement to exhaustion. The current validated state contains 22,846,872
 solution pairs and 20,872,205 unique cuts. The final large checkpoint was
 reread by `stats`, while the last cross-language formula audit remains the
-smaller `h` trio. Therefore the original question remains open.
+smaller `h` trio. Therefore this exhaustive topology lane remains unexhausted.
+The original existence question is no longer open: a later guided run found
+the independently verified unique 9+8+2 construction recorded in
+`analysis/unique-19c-9x8x2-2026-08-21.md`.
 
 An UNSAT result accompanied by a checked LRAT proof would exclude 19-cell
-puzzles directly. A unique candidate would instead be certified by its paths,
-target grid, and an UNSAT proof for a second distinct Sudoku. The persistent
-incremental CaDiCaL bridge has now completed ten durable 1,000-iteration runs;
-the other 556 batches are validated input history rather than additional full
-runs. Further refinement can resume from the retained `o` checkpoint with a
-fresh active manifest. If it
+puzzles directly. The found positive candidate is certified by its paths,
+target grid, and multiple independent exact solution counters; its provenance
+is linked above. The persistent incremental CaDiCaL bridge has now completed
+ten durable 1,000-iteration runs; the other 556 batches are validated input
+history rather than additional full runs. Further refinement can resume from
+the retained `o` checkpoint with a fresh active manifest. If it
 reaches UNSAT, that result remains provisional until a fresh proof-producing
 run on the exact final static CNF is independently verified.
 
@@ -619,11 +643,16 @@ executable SHA-256 values
 `6AF8E6792105BD2FFEBE510561241990648DCEC1619F00ADEBC1008A2BEE85DC`
 and
 `226F12710A3036233AE8DC80F9A52C95AF43B2EF2BA9DD8B4E1822D9DC650E37`.
-A subsequent test-only strengthening left production behavior unchanged; the
-current source and rebuilt executable SHA-256 values are
+A subsequent test-only strengthening left production behavior unchanged; its
+pre-partition-scope source and rebuilt executable SHA-256 values were
 `A1595CCDC9A43D203C027870FEF35BF206B6818AA462B78DF4E764C4D69D2D61`
 and
 `150916D26AF7B105A709381816915B31E36949C9A439A1BBD1E11DC96AF78C8C`.
+The current exact-9+8+2 and checkpoint-merge source and release executable
+SHA-256 values are
+`EDE9265562E4667BB44B07FFA9CCEF5ACBF384F77B7AFED9042989220B6F6EB7`
+and
+`8E9B73D98EE0416D255D093862B7F8ADA83226A90D744010F8751B97FFF0937B`.
 The bridge source and local executable SHA-256 values are
 `7A76C6FA01D1A6439A0884AD6907E459218C4511B65EB11870C07ACFFF981FA2`
 and

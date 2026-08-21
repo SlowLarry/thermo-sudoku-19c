@@ -3,6 +3,11 @@
 This workspace now contains two maintained components; the synchronized files
 under `sources/` remain read-only.
 
+**Status:** a unique 19-cell construction has been found in the 9+8+2
+partition and independently verified by several exact solvers. Its paths,
+solution, and discovery provenance are in
+[`analysis/unique-19c-9x8x2-2026-08-21.md`](analysis/unique-19c-9x8x2-2026-08-21.md).
+
 - `thermo_search/thermo_anneal.py`: corrected, bounded and reproducible
   simulated-annealing search. It can use the installed console solver for
   cross-checks or the in-process Rust backend for normal work.
@@ -58,6 +63,38 @@ described below. A negative result for that relaxation would exclude every
 disjoint thermometer layout covering at most 19 cells, regardless of its
 length partition.
 
+## Guided exact 9+8+2 portfolio
+
+The `thermo-9x8-guided` binary now uses every valid layout in the low-solution
+corpus as a verified starting point for a deterministic, elitist gradient
+search.  A move changes one cell of the length-nine or length-eight path; the
+specialized solver then scores every legal two-cell thermometer for that base
+together.  Counts are refined through a common cap ladder, so differently
+censored results are never compared as exact values.  Symmetry-equivalent full
+layouts and bases are deduplicated, while a fixed anchor schedule ensures that
+high-count corpus entries cannot be starved by the current elite beam.
+
+This heuristic is paired with, but deliberately separated from, the proof
+search.  It can export only fully enumerated Sudoku solution pairs as standard
+global CEGIS cuts; the topology tool can merge those cuts into any validated
+checkpoint.  Gradient scores themselves never prune anything.  The topology
+master also has an opt-in `exact-9+8+2` scope, so continued SAT/CEGIS search is
+deterministic and exhaustive for that partition even if the local search gets
+stuck.  The design, commands, and bounded pilot results are in
+`analysis/9x8-guided-hybrid.md`.
+
+The first clean one-cell guided run evaluated 8,136 bases and found a
+four-solution mutation. Its frontier then exhausted at 8,188 evaluations.
+A fresh run with the opt-in two-cell reroutes escaped that neighborhood and
+found a unique 19-cell 9+8+2 construction at evaluation 15,251 after about
+32 minutes. The construction and its independent Rust, ISS, native Rangsk,
+and standalone-DFS verification are recorded in
+`analysis/unique-19c-9x8x2-2026-08-21.md`.
+
+Separately, the first 100 exact-master candidates all still had at least 65
+solutions. That negative-lane run remains only a bounded diagnostic, not an
+exclusion.
+
 ## Fixed-target symbolic pilot
 
 The `thermo-fixed-target` binary implements the first relaxed trade-cut CEGIS
@@ -76,8 +113,10 @@ The `thermo-global-cegis` binary implements the target-free relaxation: an
 unknown Sudoku witness, 544 possible directed king-neighbour comparisons, a
 joint exact hitting-set/Sudoku master, and an exact batched second-solution
 checker. Its persisted pilot corpus contains 578,392 independently validated
-solution pairs. No unique 16-comparison set was found, but the master search
-was not exhausted, so this is not a 19-cell exclusion. The formulation,
+solution pairs. That bounded pilot found no unique 16-comparison set and did
+not exhaust its master. The later guided 9+8+2 construction is itself a unique
+16-comparison witness, so existence is now settled positively even though the
+master's exhaustive negative lane remains unfinished. The formulation,
 commands, hashes, checkpoints, and present scaling boundary are recorded in
 `analysis/global-cegis-pilot.md` and `analysis/target-free-cegis-design.md`.
 
@@ -93,8 +132,9 @@ thirteen full-scale candidates were all multiple. Ten completed
 1,000-iteration lazy runs, plus 556 additional validated refinement batches,
 have now grown the corpus to 22,846,872 solution pairs and 20,872,205 unique
 cuts. Every completed segment stopped at its configured iteration limit
-without finding a unique candidate or reaching UNSAT; the problem remains
-open. The
+without finding a unique candidate or reaching UNSAT. That exhaustive lane
+remains unexhausted; the existence question was subsequently resolved
+positively by the guided 9+8+2 construction above. The
 encoding, full-scale run, hashes, and proof-verification path are recorded in
 `analysis/topology-sat-pilot.md`.
 
@@ -116,5 +156,7 @@ as the maintained classic-Sudoku search implementation. The accompanying
 result corpus is classic Sudoku plus thermometers and is independently checked
 by the Rust solver.
 
-The 20-cell construction used as the unique regression fixture is by **Blue**
-and is included for research and demonstration with the creator's permission.
+The earlier 20-cell positive-control and regression fixture is by **Blue** and
+is included for research and demonstration with the creator's permission. The
+new independently verified 19-cell construction is also retained as a solver
+regression fixture.

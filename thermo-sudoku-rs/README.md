@@ -60,6 +60,45 @@ canonicalization, sharding controls, flushed JSONL checkpoints, and resumable
 base ranges.
 The completed reference shard is documented in `analysis/9x8-pilot.md`.
 
+## Deterministic guided 9+8+2 search
+
+`score_nine_eight_extensions` is the configurable-cap scoring counterpart to
+the cap-two screen.  It shares a collective base-solution prefix across every
+legal directed two-cell extension and then completes only unresolved edges
+over the nine disjoint length-eight digit templates.  Every returned score is
+either exact or the common stated lower bound; cap hits are never mislabeled
+as exact.
+
+`thermo-9x8-guided` uses that routine to search the long-path geometry.  It
+rechecks and schedules all valid corpus anchors, deduplicates under D4 plus
+global path reversal/digit complement, uses an elitist deterministic beam, and
+globally reoptimizes the two-cell path after each one-cell long-path move.
+Unconstrained legal moves are the default; the narrower
+`--solution-preserving-moves` mode is experimental.  The opt-in
+`--two-cell-reroutes` neighborhood also replaces consecutive pairs of long-path
+cells, reaching legal bases which have no legal one-cell intermediate.  A
+typical bounded run is:
+
+```text
+thermo-9x8-guided.exe \
+  --input ../sources/min_thermos_9_8_2.txt \
+  --output guided.jsonl --checkpoint guided.state \
+  --gradient-caps 8,32,128 --max-base-evaluations 10000 \
+  --pair-seed-checkpoint guided-pairs.checkpoint \
+  --pair-seed-solution-cutoff 65 --pair-seed-pairs-per-anchor 64
+```
+
+The optional pair file contains only pairs from layouts whose solutions were
+fully enumerated.  Shorter pair cuts are retained first and the global pair
+set is deterministic.  `thermo-topology-cnf merge-checkpoints` validates and
+deduplicates such a file against an existing CEGIS checkpoint.  The local
+gradient affects discovery only; it never becomes a proof premise.
+
+On 2026-08-21 the reroute-enabled search found a unique disjoint 9+8+2 layout
+covering exactly 19 cells at base evaluation 15,251. Multiple independent
+solvers confirmed the sole solution. The paths, solution, run provenance, and
+verification results are in `../analysis/unique-19c-9x8x2-2026-08-21.md`.
+
 The `thermo-fixed-target` binary is a separate symbolic pilot for arbitrary
 overlapping king-neighbour comparisons true in one solved target grid. It has
 a self-contained exact classic-Sudoku oracle, a capped hitting-set master,
@@ -81,6 +120,11 @@ The `thermo-topology-cnf` binary is the proof-oriented geometric stage. It
 emits a deterministic SAT master for every non-overlapping thermometer union
 covering at most 19 cells, validates and decodes complete SAT models, and can
 run a bounded CaDiCaL-compatible CEGIS loop using the exact Rust thermo oracle.
+Passing `--topology-scope exact-9+8+2` instead restricts that same audited
+pipeline to exactly three paths of lengths 9, 8, and 2.  The scoped formula has
+9,656 variables and 69,959 base clauses before the optional 148-clause
+D4-times-complement symmetry breaker; scope is bound into lazy manifests so
+artifacts cannot silently cross between formulas.
 Every multiple candidate adds a validated solution-pair cut to both the CNF
 and a standard checkpoint. Its `incremental-loop` mode uses the persistent
 CaDiCaL bridge in `tools/`, exact batched solution enumeration, `all` or
@@ -103,12 +147,14 @@ checkpoint write counts and timings are reported separately. See
 `analysis/topology-sat-pilot.md` for the completed bounded full-scale runs,
 artifact hashes, and independent formula audit, and `tools/README.md` for
 bridge build/run instructions and the separate LRAT certificate path.
-The current validated state follows ten completed 1,000-iteration runs plus
-556 additional refinement batches: 22,846,872 solution pairs and 20,872,205
-unique cuts, with neither a unique candidate nor UNSAT reached. The final
-large checkpoint was reread by the independent `stats` path; the most recent
-trio has not been rerun through the substantially more memory-intensive
-cross-language Python verifier.
+The exact topology runs' current validated state follows ten completed
+1,000-iteration runs plus 556 additional refinement batches: 22,846,872
+solution pairs and 20,872,205 unique cuts, with neither a unique candidate nor
+UNSAT reached in that lane. The guided lane later supplied the independently
+verified unique candidate above; the topology run itself remains unexhausted.
+The final large checkpoint was reread by the independent `stats` path; the
+most recent trio has not been rerun through the substantially more
+memory-intensive cross-language Python verifier.
 
 Counts use a limit of at least two. Reaching the limit is reported as a lower
 bound; a count below it is exact. The Rust API retains the first two witness

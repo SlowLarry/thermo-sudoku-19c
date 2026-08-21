@@ -113,9 +113,13 @@ These are meaningful local exclusions, not a global relaxed-16 result.
 
 ## Interpretation
 
-No unique sixteen-comparison set was found, and the master has not exhausted
-the search.  Therefore both the relaxed problem and the original 19-cell
-thermometer question remain open.
+This bounded pilot found no unique sixteen-comparison set, and its master did
+not exhaust the search. A later guided search nevertheless found a unique
+9+8+2 construction whose `8+7+1` adjacent inequalities are exactly sixteen
+comparisons. It is therefore also a positive witness for this relaxation and
+resolves the original 19-cell existence question. The construction and its
+independent verification are recorded in
+`analysis/unique-19c-9x8x2-2026-08-21.md`.
 
 The pilot does establish that target-free pair-cut CEGIS is correct and
 restartable.  The custom master is now allocation-light and can batch
