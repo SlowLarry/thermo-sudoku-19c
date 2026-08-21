@@ -5,8 +5,10 @@
 //! can run a bounded CaDiCaL-compatible solve/check/learn sidecar loop.  A
 //! satisfying assignment is a classic Sudoku together with a vertex-disjoint
 //! union of directed king paths covering at most 19 cells and hitting every
-//! supplied pair cut.  An UNSAT proof for the emitted CNF is therefore a
-//! checkable negative certificate for the 19-cell question.
+//! supplied pair cut. The optional exact-9+8+2 scope adds a labeled component
+//! encoding without changing the default formula. An UNSAT proof excludes the
+//! topology scope named in that emitted CNF; only the default scope addresses
+//! every disjoint layout covering at most 19 cells.
 
 use std::collections::{HashSet, hash_map::RandomState};
 use std::env;
@@ -31,7 +33,9 @@ const UNDIRECTED_EDGES: usize = DIRECTED_EDGES / 2;
 const COVER_LIMIT: usize = 19;
 const CHECKPOINT_HEADER: &str = "# thermo-global-cegis-v1";
 const ACTIVE_CUTS_HEADER: &str = "# thermo-topology-active-cuts-v1";
+const ACTIVE_CUTS_HEADER_V2: &str = "# thermo-topology-active-cuts-v2";
 const CNF_SCHEMA: &str = "thermo-topology-cnf-v2";
+const EXACT_982_CNF_SCHEMA: &str = "thermo-topology-cnf-exact-9+8+2-v1";
 const BRIDGE_PROTOCOL: &str = "thermo-cadical-bridge-v1";
 const MAX_BRIDGE_RESPONSE_BYTES: usize = 1 << 20;
 const DEFAULT_ORACLE_BATCH: usize = 32;
@@ -62,6 +66,28 @@ const SEQUENTIAL_VARIABLES: usize = (CELLS - 1) * COVER_LIMIT;
 const SWAP_BASE: i32 = SEQUENTIAL_BASE + SEQUENTIAL_VARIABLES as i32;
 const SWAP_VARIABLES: usize = 8 * DIRECTED_EDGES;
 const VARIABLE_COUNT: i32 = SWAP_BASE + SWAP_VARIABLES as i32 - 1;
+
+// The exact-9+8+2 scope appends variables, leaving every generic variable ID
+// stable.  Three cell labels identify the length-9, length-8, and length-2
+// components. Source variables count directed path components. Full unary
+// threshold counters make each requested cardinality exact rather than merely
+// bounding it from above.
+const EXACT_982_LABEL_BASE: i32 = VARIABLE_COUNT + 1;
+const EXACT_982_LABEL_VARIABLES: usize = 3 * CELLS;
+const EXACT_982_SOURCE_BASE: i32 = EXACT_982_LABEL_BASE + EXACT_982_LABEL_VARIABLES as i32;
+const EXACT_982_SOURCE_VARIABLES: usize = CELLS;
+const EXACT_982_COUNTER_BASE: i32 = EXACT_982_SOURCE_BASE + EXACT_982_SOURCE_VARIABLES as i32;
+const EXACT_982_LABEL_9_COUNTER_VARIABLES: usize = CELLS * (9 + 1);
+const EXACT_982_LABEL_8_COUNTER_VARIABLES: usize = CELLS * (8 + 1);
+const EXACT_982_LABEL_2_COUNTER_VARIABLES: usize = CELLS * (2 + 1);
+const EXACT_982_SOURCE_COUNTER_VARIABLES: usize = CELLS * (3 + 1);
+const EXACT_982_COUNTER_VARIABLES: usize = EXACT_982_LABEL_9_COUNTER_VARIABLES
+    + EXACT_982_LABEL_8_COUNTER_VARIABLES
+    + EXACT_982_LABEL_2_COUNTER_VARIABLES
+    + EXACT_982_SOURCE_COUNTER_VARIABLES;
+const EXACT_982_VARIABLE_COUNT: i32 =
+    EXACT_982_COUNTER_BASE + EXACT_982_COUNTER_VARIABLES as i32 - 1;
+const EXACT_982_EXTRA_CLAUSE_COUNT: usize = 12_575;
 
 type Grid = [u8; CELLS];
 type Clause = Vec<i32>;
@@ -438,6 +464,24 @@ fn swap_var(digit_index: usize, edge: usize) -> i32 {
     SWAP_BASE + (digit_index * DIRECTED_EDGES + edge) as i32
 }
 
+fn exact_982_label_var(label: usize, cell: usize) -> i32 {
+    debug_assert!(label < 3 && cell < CELLS);
+    EXACT_982_LABEL_BASE + (label * CELLS + cell) as i32
+}
+
+fn exact_982_source_var(cell: usize) -> i32 {
+    debug_assert!(cell < CELLS);
+    EXACT_982_SOURCE_BASE + cell as i32
+}
+
+/// Full unary threshold counter variable: among inputs through `prefix`, at
+/// least `threshold` are true. `threshold` is one-based and `width` is k + 1
+/// for an exact-k counter.
+fn exact_counter_var(base: i32, prefix: usize, threshold: usize, width: usize) -> i32 {
+    debug_assert!(threshold > 0 && threshold <= width);
+    base + (prefix * width + threshold - 1) as i32
+}
+
 fn directed_edges() -> Vec<DirectedEdge> {
     let mut result = Vec::with_capacity(DIRECTED_EDGES);
     for left in 0..CELLS {
@@ -591,6 +635,114 @@ fn coverage_clauses(clauses: &mut Vec<Clause>) {
     }
 }
 
+/// Append a propagation-complete definition of every prefix threshold through
+/// k + 1, then require the final count to be at least k and not at least k + 1.
+/// The returned value is the first unused variable after this counter.
+fn exact_cardinality_clauses(
+    clauses: &mut Vec<Clause>,
+    variables: &[i32],
+    count: usize,
+    base: i32,
+) -> i32 {
+    assert!(!variables.is_empty() && count > 0 && count < variables.len());
+    let width = count + 1;
+
+    let first = exact_counter_var(base, 0, 1, width);
+    clauses.push(vec![-variables[0], first]);
+    clauses.push(vec![variables[0], -first]);
+    for threshold in 2..=width {
+        clauses.push(vec![-exact_counter_var(base, 0, threshold, width)]);
+    }
+
+    for (prefix, &input) in variables.iter().enumerate().skip(1) {
+        let current = exact_counter_var(base, prefix, 1, width);
+        let previous = exact_counter_var(base, prefix - 1, 1, width);
+        // current <-> previous OR input
+        clauses.push(vec![-previous, current]);
+        clauses.push(vec![-input, current]);
+        clauses.push(vec![-current, previous, input]);
+
+        for threshold in 2..=width {
+            let current = exact_counter_var(base, prefix, threshold, width);
+            let previous = exact_counter_var(base, prefix - 1, threshold, width);
+            let previous_lower = exact_counter_var(base, prefix - 1, threshold - 1, width);
+            // current <-> previous OR (input AND previous_lower)
+            clauses.push(vec![-previous, current]);
+            clauses.push(vec![-input, -previous_lower, current]);
+            clauses.push(vec![-current, previous, input]);
+            clauses.push(vec![-current, previous, previous_lower]);
+        }
+    }
+
+    let last = variables.len() - 1;
+    clauses.push(vec![exact_counter_var(base, last, count, width)]);
+    clauses.push(vec![-exact_counter_var(base, last, count + 1, width)]);
+    base + (variables.len() * width) as i32
+}
+
+fn exact_982_geometry_clauses(clauses: &mut Vec<Clause>, edges: &[DirectedEdge]) {
+    // Every occupied cell has exactly one of the three length labels, and no
+    // unoccupied cell can carry one. Exact label counts sum to the existing
+    // 19-cell coverage limit, so these clauses also force exactly 19 occupied
+    // cells.
+    for cell in 0..CELLS {
+        let labels = (0..3)
+            .map(|label| exact_982_label_var(label, cell))
+            .collect::<Vec<_>>();
+        for &label in &labels {
+            clauses.push(vec![-label, occupied_var(cell)]);
+        }
+        let mut occupied_implies_label = vec![-occupied_var(cell)];
+        occupied_implies_label.extend(labels.iter().copied());
+        clauses.push(occupied_implies_label);
+        push_at_most_one(clauses, &labels);
+    }
+
+    // A selected edge cannot cross a component label. Since both endpoints
+    // are occupied, the conditional equivalences force equal labels.
+    let mut incoming = vec![Vec::<i32>::new(); CELLS];
+    for (edge_id, edge) in edges.iter().enumerate() {
+        let selected = edge_var(edge_id);
+        let lower = edge.lower as usize;
+        let upper = edge.upper as usize;
+        incoming[upper].push(selected);
+        for label in 0..3 {
+            let lower_label = exact_982_label_var(label, lower);
+            let upper_label = exact_982_label_var(label, upper);
+            clauses.push(vec![-selected, -lower_label, upper_label]);
+            clauses.push(vec![-selected, -upper_label, lower_label]);
+        }
+    }
+
+    // A source is exactly an occupied cell with no selected incoming edge.
+    // Strict digit increase makes directed cycles impossible, so sources count
+    // the path components of the selected graph.
+    for (cell, incoming) in incoming.iter().enumerate() {
+        let source = exact_982_source_var(cell);
+        clauses.push(vec![-source, occupied_var(cell)]);
+        for &selected in incoming {
+            clauses.push(vec![-source, -selected]);
+        }
+        let mut source_if_no_incoming = vec![-occupied_var(cell)];
+        source_if_no_incoming.extend(incoming.iter().copied());
+        source_if_no_incoming.push(source);
+        clauses.push(source_if_no_incoming);
+    }
+
+    let before_counters = clauses.len();
+    let mut counter_base = EXACT_982_COUNTER_BASE;
+    for (label, count) in [(0, 9), (1, 8), (2, 2)] {
+        let variables = (0..CELLS)
+            .map(|cell| exact_982_label_var(label, cell))
+            .collect::<Vec<_>>();
+        counter_base = exact_cardinality_clauses(clauses, &variables, count, counter_base);
+    }
+    let sources = (0..CELLS).map(exact_982_source_var).collect::<Vec<_>>();
+    counter_base = exact_cardinality_clauses(clauses, &sources, 3, counter_base);
+    debug_assert_eq!(counter_base - 1, EXACT_982_VARIABLE_COUNT);
+    debug_assert_eq!(clauses.len() - before_counters, 8_038);
+}
+
 fn adjacent_swap_necessity_clauses(clauses: &mut Vec<Clause>, edges: &[DirectedEdge]) {
     // If swapping symbols d and d+1 in the existential target is not to leave
     // every selected comparison unchanged, at least one selected arc must
@@ -638,12 +790,23 @@ fn d4_complement_symmetry_clauses(clauses: &mut Vec<Clause>) {
 }
 
 fn base_clauses(edges: &[DirectedEdge], symmetry_break: SymmetryBreak) -> Vec<Clause> {
+    base_clauses_for_scope(edges, symmetry_break, TopologyScope::AtMost19)
+}
+
+fn base_clauses_for_scope(
+    edges: &[DirectedEdge],
+    symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
+) -> Vec<Clause> {
     let mut clauses = Vec::new();
     classic_sudoku_clauses(&mut clauses);
     comparison_clauses(&mut clauses, edges);
     topology_clauses(&mut clauses, edges);
     coverage_clauses(&mut clauses);
     adjacent_swap_necessity_clauses(&mut clauses, edges);
+    if topology_scope == TopologyScope::Exact982 {
+        exact_982_geometry_clauses(&mut clauses, edges);
+    }
     if symmetry_break == SymmetryBreak::D4ComplementV1 {
         d4_complement_symmetry_clauses(&mut clauses);
     }
@@ -1195,6 +1358,7 @@ fn write_active_cuts_manifest(
     active: &ActiveCutPool,
     output: &Path,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<(), String> {
     active.validate(checkpoint.cuts.len())?;
     let checksum = active_cuts_checksum(checkpoint, &active.indices)?;
@@ -1217,9 +1381,18 @@ fn write_active_cuts_manifest(
         .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
     let mut writer = BufWriter::with_capacity(1 << 20, &file);
     let edge_checksum = edges_checksum(&directed_edges());
-    writeln!(writer, "{ACTIVE_CUTS_HEADER}")
-        .and_then(|_| writeln!(writer, "# cnf_schema={CNF_SCHEMA}"))
-        .and_then(|_| writeln!(writer, "# symmetry_break={}", symmetry_break.as_str()))
+    let header = match topology_scope {
+        TopologyScope::AtMost19 => ACTIVE_CUTS_HEADER,
+        TopologyScope::Exact982 => ACTIVE_CUTS_HEADER_V2,
+    };
+    writeln!(writer, "{header}")
+        .and_then(|_| writeln!(writer, "# cnf_schema={}", topology_scope.cnf_schema()))
+        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
+    if topology_scope == TopologyScope::Exact982 {
+        writeln!(writer, "# topology_scope={}", topology_scope.as_str())
+            .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
+    }
+    writeln!(writer, "# symmetry_break={}", symmetry_break.as_str())
         .and_then(|_| writeln!(writer, "# edge_order_fnv1a64={edge_checksum:016x}"))
         .and_then(|_| writeln!(writer, "# directed_edges={DIRECTED_EDGES}"))
         .and_then(|_| writeln!(writer, "# pool_pairs={}", checkpoint.pairs.len()))
@@ -1259,15 +1432,19 @@ fn load_active_cuts_manifest(
     checkpoint: &Checkpoint,
     edges: &[DirectedEdge],
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<ActiveCutPool, String> {
     let contents = fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     let mut lines = contents.lines().enumerate();
-    if lines.next().map(|(_, line)| line) != Some(ACTIVE_CUTS_HEADER) {
+    let header = lines.next().map(|(_, line)| line);
+    let legacy = header == Some(ACTIVE_CUTS_HEADER);
+    if !legacy && header != Some(ACTIVE_CUTS_HEADER_V2) {
         return Err("wrong or missing active-cut manifest schema header".into());
     }
     let mut declared_edges = None;
     let mut declared_schema = None;
+    let mut declared_topology_scope = None;
     let mut declared_symmetry = None;
     let mut declared_edge_checksum = None;
     let mut declared_pool_pairs = None;
@@ -1333,6 +1510,14 @@ fn load_active_cuts_manifest(
             if data_started || declared_schema.replace(value.to_string()).is_some() {
                 return Err(format!(
                     "line {line_number}: misplaced or duplicate CNF schema"
+                ));
+            }
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("# topology_scope=") {
+            if data_started || declared_topology_scope.replace(value.to_string()).is_some() {
+                return Err(format!(
+                    "line {line_number}: misplaced or duplicate topology scope"
                 ));
             }
             continue;
@@ -1426,7 +1611,15 @@ fn load_active_cuts_manifest(
         .ok_or_else(|| "active-cut manifest has no pool cut count".to_string())?;
     let pool_checksum = declared_pool_checksum
         .ok_or_else(|| "active-cut manifest has no pool checksum".to_string())?;
-    if declared_schema.as_deref() != Some(CNF_SCHEMA)
+    let scope_metadata_valid = if legacy {
+        topology_scope == TopologyScope::AtMost19
+            && declared_schema.as_deref() == Some(CNF_SCHEMA)
+            && declared_topology_scope.is_none()
+    } else {
+        declared_schema.as_deref() == Some(topology_scope.cnf_schema())
+            && declared_topology_scope.as_deref() == Some(topology_scope.as_str())
+    };
+    if !scope_metadata_valid
         || declared_symmetry.as_deref() != Some(symmetry_break.as_str())
         || declared_edge_checksum != Some(edges_checksum(edges))
         || declared_edges != Some(DIRECTED_EDGES)
@@ -1454,9 +1647,9 @@ fn load_active_cuts_manifest(
     Ok(active)
 }
 
-fn parse_sat_result(text: &str) -> Result<SatResult, String> {
+fn parse_sat_result(text: &str, variable_count: i32) -> Result<SatResult, String> {
     let mut status = None;
-    let mut values = vec![None::<bool>; VARIABLE_COUNT as usize + 1];
+    let mut values = vec![None::<bool>; variable_count as usize + 1];
     let mut saw_literal = false;
     for (line_index, raw_line) in text.lines().enumerate() {
         let line_number = line_index + 1;
@@ -1498,9 +1691,9 @@ fn parse_sat_result(text: &str) -> Result<SatResult, String> {
                 continue;
             }
             let variable = literal.unsigned_abs() as usize;
-            if variable > VARIABLE_COUNT as usize {
+            if variable > variable_count as usize {
                 return Err(format!(
-                    "model line {line_number}: variable {variable} exceeds {VARIABLE_COUNT}"
+                    "model line {line_number}: variable {variable} exceeds {variable_count}"
                 ));
             }
             saw_literal = true;
@@ -1521,7 +1714,7 @@ fn parse_sat_result(text: &str) -> Result<SatResult, String> {
         if !saw_literal {
             return Err("SAT model contains no witness literals".into());
         }
-        let missing = (1..=VARIABLE_COUNT as usize)
+        let missing = (1..=variable_count as usize)
             .filter(|&variable| values[variable].is_none())
             .take(8)
             .collect::<Vec<_>>();
@@ -1596,17 +1789,35 @@ fn violated_inactive_cut_indices(
     ))
 }
 
+#[cfg(test)]
 fn decode_candidate_with_base(
     required_cuts: &[PairCut],
     assignment: &[bool],
     edges: &[DirectedEdge],
     base: &[Clause],
 ) -> Result<DecodedCandidate, String> {
-    if assignment.len() != VARIABLE_COUNT as usize + 1 {
+    decode_candidate_with_scope_and_base(
+        required_cuts,
+        assignment,
+        edges,
+        base,
+        TopologyScope::AtMost19,
+    )
+}
+
+fn decode_candidate_with_scope_and_base(
+    required_cuts: &[PairCut],
+    assignment: &[bool],
+    edges: &[DirectedEdge],
+    base: &[Clause],
+    topology_scope: TopologyScope,
+) -> Result<DecodedCandidate, String> {
+    let variable_count = topology_scope.variable_count();
+    if assignment.len() != variable_count as usize + 1 {
         return Err(format!(
             "assignment has {} entries, expected {}",
             assignment.len(),
-            VARIABLE_COUNT + 1
+            variable_count + 1
         ));
     }
     if let Some((index, _)) = base
@@ -1705,12 +1916,14 @@ fn decode_candidate_with_base(
     if solver.layout().covered_cells() != covered_cells {
         return Err("decoded paths and occupied-cell count disagree".into());
     }
-    Ok(DecodedCandidate {
+    let candidate = DecodedCandidate {
         target,
         selected,
         paths,
         covered_cells,
-    })
+    };
+    topology_scope.validates_candidate(&candidate)?;
+    Ok(candidate)
 }
 
 #[cfg(test)]
@@ -1769,6 +1982,7 @@ fn invoke_sat(
     model: &Path,
     proof: Option<&Path>,
     conflicts: Option<u64>,
+    variable_count: i32,
 ) -> Result<SatResult, String> {
     if model.exists() {
         fs::remove_file(model)
@@ -1807,7 +2021,7 @@ fn invoke_sat(
         String::from_utf8(output.stdout)
             .map_err(|_| "SAT solver stdout is not valid UTF-8".to_string())?
     };
-    let result = parse_sat_result(&model_text)?;
+    let result = parse_sat_result(&model_text, variable_count)?;
     let expected_code = match result.status {
         SatStatus::Satisfiable => 10,
         SatStatus::Unsatisfiable => 20,
@@ -1832,6 +2046,7 @@ struct BridgeMetadata {
 
 fn parse_bridge_ready(
     line: &str,
+    expected_variables: usize,
     expected_clauses: usize,
     expected_prefer_selected: bool,
 ) -> Result<BridgeMetadata, String> {
@@ -1859,9 +2074,9 @@ fn parse_bridge_ready(
         "1" => true,
         _ => return Err("invalid bridge prefer_selected flag".into()),
     };
-    if variables != VARIABLE_COUNT as usize {
+    if variables != expected_variables {
         return Err(format!(
-            "bridge loaded {variables} variables, expected {VARIABLE_COUNT}"
+            "bridge loaded {variables} variables, expected {expected_variables}"
         ));
     }
     if clauses != expected_clauses {
@@ -1880,12 +2095,12 @@ fn parse_bridge_ready(
     })
 }
 
-fn parse_bridge_model(line: &str) -> Result<Vec<bool>, String> {
+fn parse_bridge_model(line: &str, variable_count: usize) -> Result<Vec<bool>, String> {
     let mut tokens = line.split_whitespace();
     if tokens.next() != Some("MODEL") {
         return Err(format!("expected bridge MODEL response, got {line:?}"));
     }
-    let mut assignment = vec![false; VARIABLE_COUNT as usize + 1];
+    let mut assignment = vec![false; variable_count + 1];
     for (variable, value) in assignment.iter_mut().enumerate().skip(1) {
         let token = tokens
             .next()
@@ -1912,6 +2127,7 @@ struct IncrementalBridge {
     output: BufReader<ChildStdout>,
     initial_clauses: usize,
     added_clauses: usize,
+    variable_count: usize,
     metadata: BridgeMetadata,
     executable: PathBuf,
 }
@@ -1920,6 +2136,7 @@ impl IncrementalBridge {
     fn spawn(
         executable: &Path,
         cnf: &Path,
+        variable_count: usize,
         clauses: usize,
         prefer_selected: bool,
     ) -> Result<Self, String> {
@@ -1934,7 +2151,7 @@ impl IncrementalBridge {
             .arg("--cnf")
             .arg(cnf)
             .arg("--variables")
-            .arg(VARIABLE_COUNT.to_string())
+            .arg(variable_count.to_string())
             .arg("--clauses")
             .arg(clauses.to_string())
             .stdin(Stdio::piped())
@@ -1962,6 +2179,7 @@ impl IncrementalBridge {
             output: BufReader::new(output),
             initial_clauses: clauses,
             added_clauses: 0,
+            variable_count,
             metadata: BridgeMetadata {
                 cadical: String::new(),
                 revision: String::new(),
@@ -1971,7 +2189,7 @@ impl IncrementalBridge {
             executable,
         };
         let ready = bridge.read_line("READY")?;
-        bridge.metadata = parse_bridge_ready(&ready, clauses, prefer_selected)?;
+        bridge.metadata = parse_bridge_ready(&ready, variable_count, clauses, prefer_selected)?;
         Ok(bridge)
     }
 
@@ -2038,24 +2256,24 @@ impl IncrementalBridge {
                 assignment: None,
             }),
             _ => {
-                let expected = format!("RESULT SAT {VARIABLE_COUNT}");
+                let expected = format!("RESULT SAT {}", self.variable_count);
                 if response != expected {
                     return Err(format!("malformed bridge result {response:?}"));
                 }
                 let model = self.read_line("MODEL")?;
                 Ok(SatResult {
                     status: SatStatus::Satisfiable,
-                    assignment: Some(parse_bridge_model(&model)?),
+                    assignment: Some(parse_bridge_model(&model, self.variable_count)?),
                 })
             }
         }
     }
 
     fn add_clause(&mut self, clause: &[i32]) -> Result<(), String> {
-        if clause.len() > VARIABLE_COUNT as usize
+        if clause.len() > self.variable_count
             || clause
                 .iter()
-                .any(|literal| *literal == 0 || literal.unsigned_abs() > VARIABLE_COUNT as u32)
+                .any(|literal| *literal == 0 || literal.unsigned_abs() > self.variable_count as u32)
         {
             return Err("refusing to send an invalid incremental clause".into());
         }
@@ -2194,6 +2412,86 @@ fn write_cnf(
     Ok((VARIABLE_COUNT as usize, clause_count))
 }
 
+fn write_exact_982_cnf(
+    checkpoint: &Checkpoint,
+    output: &Path,
+    symmetry_break: SymmetryBreak,
+) -> Result<(usize, usize), String> {
+    let edges = directed_edges();
+    let edge_checksum = edges_checksum(&edges);
+    let topology_scope = TopologyScope::Exact982;
+    let base = base_clauses_for_scope(&edges, symmetry_break, topology_scope);
+    let clause_count = base.len() + checkpoint.cuts.len();
+    let file = fs::File::create(output)
+        .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
+    let mut writer = BufWriter::new(file);
+    writeln!(writer, "c {EXACT_982_CNF_SCHEMA}")
+        .and_then(|_| writeln!(writer, "c topology_scope {}", topology_scope.as_str()))
+        .and_then(|_| {
+            writeln!(
+                writer,
+                "c model classic-sudoku plus exactly-three-disjoint-directed-king-paths"
+            )
+        })
+        .and_then(|_| writeln!(writer, "c thermometer_lengths 9 8 2"))
+        .and_then(|_| writeln!(writer, "c covered_cells_exactly 19"))
+        .and_then(|_| writeln!(writer, "c diagonal_crossings_without_shared_cells allowed"))
+        .and_then(|_| writeln!(writer, "c symmetry_break {}", symmetry_break.as_str()))
+        .and_then(|_| writeln!(writer, "c checkpoint_budget {}", checkpoint.budget))
+        .and_then(|_| writeln!(writer, "c checkpoint_pairs {}", checkpoint.pairs.len()))
+        .and_then(|_| writeln!(writer, "c unique_pair_cuts {}", checkpoint.cuts.len()))
+        .and_then(|_| writeln!(writer, "c checkpoint_fnv1a64 {:016x}", checkpoint.checksum))
+        .and_then(|_| writeln!(writer, "c digit_variables 1 729"))
+        .and_then(|_| writeln!(writer, "c edge_variables 730 1273"))
+        .and_then(|_| writeln!(writer, "c occupied_variables 1274 1354"))
+        .and_then(|_| writeln!(writer, "c sequential_variables 1355 2874"))
+        .and_then(|_| writeln!(writer, "c swap_witness_variables 2875 7226"))
+        .and_then(|_| writeln!(writer, "c component_label_variables 7227 7469"))
+        .and_then(|_| writeln!(writer, "c path_source_variables 7470 7550"))
+        .and_then(|_| writeln!(writer, "c exact_counter_variables 7551 9656"))
+        .and_then(|_| {
+            writeln!(
+                writer,
+                "c edge_order lexicographic unordered cell pair then forward and reverse"
+            )
+        })
+        .and_then(|_| writeln!(writer, "c edge_order_fnv1a64 {edge_checksum:016x}"))
+        .and_then(|_| writeln!(writer, "c digit_var 1+9*cell+(digit-1)"))
+        .and_then(|_| writeln!(writer, "c edge_var 730+edge_id"))
+        .and_then(|_| writeln!(writer, "c occupied_var 1274+cell"))
+        .and_then(|_| writeln!(writer, "c sequential_var 1355+19*prefix+count"))
+        .and_then(|_| writeln!(writer, "c swap_var 2875+544*(digit-1)+edge_id"))
+        .and_then(|_| writeln!(writer, "c component_label_var 7227+81*label+cell"))
+        .and_then(|_| writeln!(writer, "c path_source_var 7470+cell"))
+        .and_then(|_| writeln!(writer, "p cnf {EXACT_982_VARIABLE_COUNT} {clause_count}"))
+        .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+
+    for clause in &base {
+        write_clause(&mut writer, clause)
+            .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    }
+    for &cut in &checkpoint.cuts {
+        write_clause(&mut writer, &pair_clause(cut))
+            .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    }
+    writer
+        .flush()
+        .map_err(|error| format!("cannot finish {}: {error}", output.display()))?;
+    Ok((EXACT_982_VARIABLE_COUNT as usize, clause_count))
+}
+
+fn write_cnf_for_scope(
+    checkpoint: &Checkpoint,
+    output: &Path,
+    symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
+) -> Result<(usize, usize), String> {
+    match topology_scope {
+        TopologyScope::AtMost19 => write_cnf(checkpoint, output, symmetry_break),
+        TopologyScope::Exact982 => write_exact_982_cnf(checkpoint, output, symmetry_break),
+    }
+}
+
 /// Write the exact static formula currently held by a lazy bridge: the full
 /// topology base plus only the active, globally valid pair cuts. The manifest
 /// retains a solved-grid witness for every listed cut, so this smaller formula
@@ -2269,6 +2567,100 @@ fn write_lazy_cnf(
     Ok((VARIABLE_COUNT as usize, clause_count))
 }
 
+fn write_exact_982_lazy_cnf(
+    checkpoint: &Checkpoint,
+    active: &ActiveCutPool,
+    output: &Path,
+    symmetry_break: SymmetryBreak,
+) -> Result<(usize, usize), String> {
+    active.validate(checkpoint.cuts.len())?;
+    let edges = directed_edges();
+    let edge_checksum = edges_checksum(&edges);
+    let topology_scope = TopologyScope::Exact982;
+    let base = base_clauses_for_scope(&edges, symmetry_break, topology_scope);
+    let clause_count = base.len() + active.indices.len();
+    let file = fs::File::create(output)
+        .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
+    let mut writer = BufWriter::new(file);
+    writeln!(writer, "c {EXACT_982_CNF_SCHEMA}")
+        .and_then(|_| writeln!(writer, "c cut_pool_mode lazy-active-v1"))
+        .and_then(|_| writeln!(writer, "c topology_scope {}", topology_scope.as_str()))
+        .and_then(|_| {
+            writeln!(
+                writer,
+                "c model classic-sudoku plus exactly-three-disjoint-directed-king-paths"
+            )
+        })
+        .and_then(|_| writeln!(writer, "c thermometer_lengths 9 8 2"))
+        .and_then(|_| writeln!(writer, "c covered_cells_exactly 19"))
+        .and_then(|_| writeln!(writer, "c diagonal_crossings_without_shared_cells allowed"))
+        .and_then(|_| writeln!(writer, "c symmetry_break {}", symmetry_break.as_str()))
+        .and_then(|_| writeln!(writer, "c checkpoint_budget {}", checkpoint.budget))
+        .and_then(|_| writeln!(writer, "c checkpoint_pairs {}", checkpoint.pairs.len()))
+        .and_then(|_| writeln!(writer, "c full_unique_pair_cuts {}", checkpoint.cuts.len()))
+        .and_then(|_| writeln!(writer, "c active_pair_cuts {}", active.indices.len()))
+        .and_then(|_| writeln!(writer, "c checkpoint_fnv1a64 {:016x}", checkpoint.checksum))
+        .and_then(|_| {
+            writeln!(
+                writer,
+                "c active_fnv1a64 {:016x}",
+                active_cuts_checksum(checkpoint, &active.indices)
+                    .expect("active pool validated above")
+            )
+        })
+        .and_then(|_| writeln!(writer, "c digit_variables 1 729"))
+        .and_then(|_| writeln!(writer, "c edge_variables 730 1273"))
+        .and_then(|_| writeln!(writer, "c occupied_variables 1274 1354"))
+        .and_then(|_| writeln!(writer, "c sequential_variables 1355 2874"))
+        .and_then(|_| writeln!(writer, "c swap_witness_variables 2875 7226"))
+        .and_then(|_| writeln!(writer, "c component_label_variables 7227 7469"))
+        .and_then(|_| writeln!(writer, "c path_source_variables 7470 7550"))
+        .and_then(|_| writeln!(writer, "c exact_counter_variables 7551 9656"))
+        .and_then(|_| {
+            writeln!(
+                writer,
+                "c edge_order lexicographic unordered cell pair then forward and reverse"
+            )
+        })
+        .and_then(|_| writeln!(writer, "c edge_order_fnv1a64 {edge_checksum:016x}"))
+        .and_then(|_| writeln!(writer, "c digit_var 1+9*cell+(digit-1)"))
+        .and_then(|_| writeln!(writer, "c edge_var 730+edge_id"))
+        .and_then(|_| writeln!(writer, "c occupied_var 1274+cell"))
+        .and_then(|_| writeln!(writer, "c sequential_var 1355+19*prefix+count"))
+        .and_then(|_| writeln!(writer, "c swap_var 2875+544*(digit-1)+edge_id"))
+        .and_then(|_| writeln!(writer, "c component_label_var 7227+81*label+cell"))
+        .and_then(|_| writeln!(writer, "c path_source_var 7470+cell"))
+        .and_then(|_| writeln!(writer, "p cnf {EXACT_982_VARIABLE_COUNT} {clause_count}"))
+        .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    for clause in &base {
+        write_clause(&mut writer, clause)
+            .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    }
+    for &index in &active.indices {
+        write_clause(&mut writer, &pair_clause(checkpoint.cuts[index]))
+            .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    }
+    writer
+        .flush()
+        .map_err(|error| format!("cannot finish {}: {error}", output.display()))?;
+    Ok((EXACT_982_VARIABLE_COUNT as usize, clause_count))
+}
+
+fn write_lazy_cnf_for_scope(
+    checkpoint: &Checkpoint,
+    active: &ActiveCutPool,
+    output: &Path,
+    symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
+) -> Result<(usize, usize), String> {
+    match topology_scope {
+        TopologyScope::AtMost19 => write_lazy_cnf(checkpoint, active, output, symmetry_break),
+        TopologyScope::Exact982 => {
+            write_exact_982_lazy_cnf(checkpoint, active, output, symmetry_break)
+        }
+    }
+}
+
 fn find_once(haystack: &[u8], needle: &[u8], label: &str) -> Result<usize, String> {
     let matches = haystack
         .windows(needle.len())
@@ -2288,7 +2680,8 @@ fn find_once(haystack: &[u8], needle: &[u8], label: &str) -> Result<usize, Strin
 /// place. Pair records whose cut duplicates an existing cut update only the
 /// checkpoint metadata. When a decimal field crosses a width boundary, fall
 /// back to a deterministic full rewrite. In either case the result is
-/// byte-for-byte identical to `write_cnf(after)`.
+/// byte-for-byte identical to `write_cnf_for_scope(after)`.
+#[allow(clippy::too_many_arguments)]
 fn append_refinement_to_cnf(
     path: &Path,
     before_pairs: usize,
@@ -2297,6 +2690,7 @@ fn append_refinement_to_cnf(
     after: &Checkpoint,
     new_cuts: &[PairCut],
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<(), String> {
     if after.pairs.len() <= before_pairs
         || after.cuts.len() != before_cuts + new_cuts.len()
@@ -2305,20 +2699,21 @@ fn append_refinement_to_cnf(
     {
         return Err("invalid before/after state for incremental CNF append".into());
     }
-    let base_count = BASE_CLAUSE_COUNT + symmetry_break.extra_clauses();
+    let base_count = topology_scope.base_clause_count(symmetry_break);
+    let variable_count = topology_scope.variable_count();
     let old_pairs = format!("c checkpoint_pairs {before_pairs}\n");
     let new_pairs = format!("c checkpoint_pairs {}\n", after.pairs.len());
     let old_cuts = format!("c unique_pair_cuts {before_cuts}\n");
     let new_cuts_header = format!("c unique_pair_cuts {}\n", after.cuts.len());
     let old_checksum = format!("c checkpoint_fnv1a64 {before_checksum:016x}\n");
     let new_checksum = format!("c checkpoint_fnv1a64 {:016x}\n", after.checksum);
-    let old_header = format!("p cnf {VARIABLE_COUNT} {}\n", base_count + before_cuts);
-    let new_header = format!("p cnf {VARIABLE_COUNT} {}\n", base_count + after.cuts.len());
+    let old_header = format!("p cnf {variable_count} {}\n", base_count + before_cuts);
+    let new_header = format!("p cnf {variable_count} {}\n", base_count + after.cuts.len());
     if old_pairs.len() != new_pairs.len()
         || old_cuts.len() != new_cuts_header.len()
         || old_header.len() != new_header.len()
     {
-        write_cnf(after, path, symmetry_break)?;
+        write_cnf_for_scope(after, path, symmetry_break, topology_scope)?;
         return Ok(());
     }
 
@@ -2368,6 +2763,7 @@ fn append_refinement_to_cnf(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_pair_to_cnf(
     path: &Path,
     before_pairs: usize,
@@ -2376,6 +2772,7 @@ fn append_pair_to_cnf(
     after: &Checkpoint,
     pair: &GridPair,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<(), String> {
     if after.pairs.last() != Some(pair) || after.cuts.len() != before_cuts + 1 {
         return Err("invalid single-pair CNF append".into());
@@ -2388,6 +2785,7 @@ fn append_pair_to_cnf(
         after,
         &after.cuts[before_cuts..],
         symmetry_break,
+        topology_scope,
     )
 }
 
@@ -2403,6 +2801,71 @@ impl PairMode {
             Self::Anchor => "anchor",
             Self::All => "all",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TopologyScope {
+    AtMost19,
+    Exact982,
+}
+
+impl TopologyScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::AtMost19 => "at-most-19",
+            Self::Exact982 => "exact-9+8+2",
+        }
+    }
+
+    fn cnf_schema(self) -> &'static str {
+        match self {
+            Self::AtMost19 => CNF_SCHEMA,
+            Self::Exact982 => EXACT_982_CNF_SCHEMA,
+        }
+    }
+
+    fn search_scope(self) -> &'static str {
+        match self {
+            Self::AtMost19 => {
+                "classic-sudoku-plus-nonoverlapping-king-step-thermometers-at-most-19-covered-cells"
+            }
+            Self::Exact982 => {
+                "classic-sudoku-plus-nonoverlapping-king-step-thermometers-exact-9+8+2"
+            }
+        }
+    }
+
+    fn variable_count(self) -> i32 {
+        match self {
+            Self::AtMost19 => VARIABLE_COUNT,
+            Self::Exact982 => EXACT_982_VARIABLE_COUNT,
+        }
+    }
+
+    fn base_clause_count(self, symmetry_break: SymmetryBreak) -> usize {
+        BASE_CLAUSE_COUNT
+            + match self {
+                Self::AtMost19 => 0,
+                Self::Exact982 => EXACT_982_EXTRA_CLAUSE_COUNT,
+            }
+            + symmetry_break.extra_clauses()
+    }
+
+    fn validates_candidate(self, candidate: &DecodedCandidate) -> Result<(), String> {
+        if self == Self::AtMost19 {
+            return Ok(());
+        }
+        let mut lengths = candidate.paths.iter().map(Vec::len).collect::<Vec<_>>();
+        lengths.sort_unstable();
+        if candidate.covered_cells != 19 || candidate.selected.len() != 16 || lengths != [2, 8, 9] {
+            return Err(format!(
+                "decoded topology is outside exact 9+8+2 scope: covered={} comparisons={} lengths={lengths:?}",
+                candidate.covered_cells,
+                candidate.selected.len()
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -2463,22 +2926,30 @@ enum Mode {
     Stats {
         checkpoint: PathBuf,
     },
+    MergeCheckpoints {
+        checkpoint: PathBuf,
+        merge_checkpoints: Vec<PathBuf>,
+        output: PathBuf,
+    },
     Emit {
         checkpoint: PathBuf,
         output: PathBuf,
         symmetry_break: SymmetryBreak,
+        topology_scope: TopologyScope,
     },
     EmitActive {
         checkpoint: PathBuf,
         active_cuts: PathBuf,
         output: PathBuf,
         symmetry_break: SymmetryBreak,
+        topology_scope: TopologyScope,
     },
     Decode {
         checkpoint: PathBuf,
         model: PathBuf,
         output: Option<PathBuf>,
         symmetry_break: SymmetryBreak,
+        topology_scope: TopologyScope,
     },
     Loop {
         checkpoint: PathBuf,
@@ -2490,6 +2961,7 @@ enum Mode {
         max_iterations: usize,
         conflicts: Option<u64>,
         symmetry_break: SymmetryBreak,
+        topology_scope: TopologyScope,
     },
     IncrementalLoop {
         checkpoint: PathBuf,
@@ -2503,6 +2975,7 @@ enum Mode {
         prefer_selected: bool,
         checkpoint_every: usize,
         symmetry_break: SymmetryBreak,
+        topology_scope: TopologyScope,
         lazy_cuts: Option<LazyCutOptions>,
     },
 }
@@ -2511,24 +2984,33 @@ fn print_help() {
     println!(
         "thermo-topology-cnf [emit] --checkpoint PATH --output CNF\n\
              [--symmetry-break none|d4-complement-v1]\n\
+             [--topology-scope at-most-19|exact-9+8+2]\n\
          thermo-topology-cnf emit-active --checkpoint PATH --active-cuts PATH\n\
              --output CNF [--symmetry-break none|d4-complement-v1]\n\
+             [--topology-scope at-most-19|exact-9+8+2]\n\
          thermo-topology-cnf stats --checkpoint PATH\n\
+         thermo-topology-cnf merge-checkpoints --checkpoint BASE\n\
+             --merge-checkpoint PATH [--merge-checkpoint PATH ...] --output PATH\n\
          thermo-topology-cnf decode --checkpoint PATH --model MODEL [--output FILE]\n\
              [--symmetry-break none|d4-complement-v1]\n\
+             [--topology-scope at-most-19|exact-9+8+2]\n\
          thermo-topology-cnf loop --checkpoint PATH --next-checkpoint PATH\n\
              --sat-exe PATH --cnf PATH [--model PATH] [--proof PATH]\n\
              [--max-iterations N] [--conflicts N]\n\
              [--symmetry-break none|d4-complement-v1]\n\
+             [--topology-scope at-most-19|exact-9+8+2]\n\
          thermo-topology-cnf incremental-loop --checkpoint PATH\n\
              --next-checkpoint PATH --bridge-exe PATH --cnf PATH\n\
              [--max-iterations N] [--conflicts N] [--oracle-batch N]\n\
              [--pair-mode all|anchor] [--prefer-selected]\n\
              [--checkpoint-every N] [--symmetry-break none|d4-complement-v1]\n\
+             [--topology-scope at-most-19|exact-9+8+2]\n\
              [--lazy-cuts ACTIVE-MANIFEST] [--lazy-active-seed N]\n\
              [--lazy-violation-batch N|all]\n\
          \n\
          `stats` reports exact pair-clause deduplication without writing a CNF.\n\
+         `merge-checkpoints` appends distinct pairs from each validated v1 input\n\
+         in command-line order, preserving the base checkpoint as an exact prefix.\n\
          `emit` writes the deterministic full topology master. `emit-active`\n\
          validates a lazy active-cut manifest and regenerates its exact small\n\
          static CNF. `decode` validates a\n\
@@ -2544,7 +3026,8 @@ fn print_help() {
         "\nSAT sidecar contract:\n\
          - the executable must accept CaDiCaL's `-q -w MODEL [-c N] CNF [PROOF]`;\n\
          - exit 10 means SAT, exit 20 UNSAT, and exit 0 UNKNOWN;\n\
-         - SAT output must assign every variable 1..=7226 exactly once in\n\
+         - SAT output must assign every variable declared by the CNF exactly\n\
+           once (7226 by default, 9656 for exact-9+8+2) in\n\
            competition `s`/`v` format; partial, conflicting, out-of-range, or\n\
            clause-violating models are rejected;\n\
          - `--proof` is useful only when the final status is UNSAT. On SAT or\n\
@@ -2555,7 +3038,7 @@ fn print_help() {
          \n\
          Persistent bridge contract:\n\
          - build tools/cadical-incremental-bridge.cpp against CaDiCaL;\n\
-         - the strict v1 protocol returns all 7226 val results immediately\n\
+         - the strict v1 protocol returns every declared val result immediately\n\
            after SAT, before any subsequent clause addition;\n\
          - --conflicts is reset for each solve; values above INT_MAX are\n\
            rejected;\n\
@@ -2569,8 +3052,11 @@ fn print_help() {
          - every normal lazy-mode exit rewrites --cnf as the exact static\n\
            base-plus-active formula suitable for a fresh proof rerun;\n\
          - --symmetry-break d4-complement-v1 adds the versioned optional\n\
-           D4-times-complement representative constraints and is off by\n\
-           default."
+         D4-times-complement representative constraints and is off by\n\
+         default;\n\
+         - --topology-scope exact-9+8+2 restricts the master to three\n\
+         cell-disjoint paths of those exact lengths. The default at-most-19\n\
+         formula and its DIMACS bytes are unchanged."
     );
 }
 
@@ -2715,6 +3201,7 @@ fn parse_options() -> Result<Mode, String> {
         "emit".to_string()
     };
     let mut checkpoint = None;
+    let mut merge_checkpoints = Vec::new();
     let mut output = None;
     let mut model = None;
     let mut next_checkpoint = None;
@@ -2739,12 +3226,19 @@ fn parse_options() -> Result<Mode, String> {
     let mut lazy_violation_batch_set = false;
     let mut symmetry_break = SymmetryBreak::None;
     let mut symmetry_break_set = false;
+    let mut topology_scope = TopologyScope::AtMost19;
+    let mut topology_scope_set = false;
     let mut index = 0usize;
     while index < arguments.len() {
         let argument = &arguments[index];
         match argument.as_str() {
             "--checkpoint" => {
                 checkpoint = Some(PathBuf::from(require_value(
+                    argument, &mut index, &arguments,
+                )?));
+            }
+            "--merge-checkpoint" => {
+                merge_checkpoints.push(PathBuf::from(require_value(
                     argument, &mut index, &arguments,
                 )?));
             }
@@ -2867,6 +3361,18 @@ fn parse_options() -> Result<Mode, String> {
                     }
                 };
             }
+            "--topology-scope" => {
+                topology_scope_set = true;
+                topology_scope = match require_value(argument, &mut index, &arguments)?.as_str() {
+                    "at-most-19" => TopologyScope::AtMost19,
+                    "exact-9+8+2" => TopologyScope::Exact982,
+                    value => {
+                        return Err(format!(
+                            "invalid --topology-scope {value:?}; expected at-most-19 or exact-9+8+2"
+                        ));
+                    }
+                };
+            }
             _ => return Err(format!("unknown option {argument:?}; use --help")),
         }
         index += 1;
@@ -2881,6 +3387,7 @@ fn parse_options() -> Result<Mode, String> {
         || lazy_cuts.is_some()
         || lazy_active_seed_set
         || lazy_violation_batch_set;
+    let has_merge_options = !merge_checkpoints.is_empty();
     match command.as_str() {
         "stats" => {
             if output.is_some()
@@ -2894,10 +3401,50 @@ fn parse_options() -> Result<Mode, String> {
                 || has_incremental_only_options
                 || active_cuts.is_some()
                 || symmetry_break_set
+                || topology_scope_set
+                || has_merge_options
             {
                 return Err("stats accepts only --checkpoint".into());
             }
             Ok(Mode::Stats { checkpoint })
+        }
+        "merge-checkpoints" => {
+            if model.is_some()
+                || next_checkpoint.is_some()
+                || sat_exe.is_some()
+                || bridge_exe.is_some()
+                || cnf.is_some()
+                || proof.is_some()
+                || conflicts.is_some()
+                || max_iterations != 1
+                || has_incremental_only_options
+                || active_cuts.is_some()
+                || symmetry_break_set
+                || topology_scope_set
+            {
+                return Err(
+                    "merge-checkpoints accepts only --checkpoint, --merge-checkpoint, and --output"
+                        .into(),
+                );
+            }
+            if merge_checkpoints.is_empty() {
+                return Err("merge-checkpoints requires at least one --merge-checkpoint".into());
+            }
+            let output =
+                output.ok_or_else(|| "--output is required for merge-checkpoints".to_string())?;
+            let mut paths = vec![
+                ("checkpoint", checkpoint.as_path()),
+                ("output", output.as_path()),
+            ];
+            for path in &merge_checkpoints {
+                paths.push(("merge-checkpoint", path.as_path()));
+            }
+            reject_collisions(&paths)?;
+            Ok(Mode::MergeCheckpoints {
+                checkpoint,
+                merge_checkpoints,
+                output,
+            })
         }
         "emit" => {
             if model.is_some()
@@ -2909,6 +3456,7 @@ fn parse_options() -> Result<Mode, String> {
                 || max_iterations != 1
                 || has_incremental_only_options
                 || active_cuts.is_some()
+                || has_merge_options
             {
                 return Err(
                     "emit accepts only --checkpoint, --output, and --symmetry-break".into(),
@@ -2920,6 +3468,7 @@ fn parse_options() -> Result<Mode, String> {
                 checkpoint,
                 output,
                 symmetry_break,
+                topology_scope,
             })
         }
         "emit-active" => {
@@ -2938,6 +3487,7 @@ fn parse_options() -> Result<Mode, String> {
                 || lazy_cuts.is_some()
                 || lazy_active_seed_set
                 || lazy_violation_batch_set
+                || has_merge_options
             {
                 return Err(
                     "emit-active accepts only --checkpoint, --active-cuts, --output, and --symmetry-break"
@@ -2958,6 +3508,7 @@ fn parse_options() -> Result<Mode, String> {
                 active_cuts,
                 output,
                 symmetry_break,
+                topology_scope,
             })
         }
         "decode" => {
@@ -2969,6 +3520,7 @@ fn parse_options() -> Result<Mode, String> {
                 || max_iterations != 1
                 || has_incremental_only_options
                 || active_cuts.is_some()
+                || has_merge_options
             {
                 return Err(
                     "decode accepts only --checkpoint, --model, --output, and --symmetry-break"
@@ -2989,10 +3541,15 @@ fn parse_options() -> Result<Mode, String> {
                 model,
                 output,
                 symmetry_break,
+                topology_scope,
             })
         }
         "loop" => {
-            if output.is_some() || has_incremental_only_options || active_cuts.is_some() {
+            if output.is_some()
+                || has_incremental_only_options
+                || active_cuts.is_some()
+                || has_merge_options
+            {
                 return Err("loop does not accept output or incremental-loop options".into());
             }
             let next_checkpoint = next_checkpoint
@@ -3021,6 +3578,7 @@ fn parse_options() -> Result<Mode, String> {
                 max_iterations,
                 conflicts,
                 symmetry_break,
+                topology_scope,
             })
         }
         "incremental-loop" => {
@@ -3029,6 +3587,7 @@ fn parse_options() -> Result<Mode, String> {
                 || sat_exe.is_some()
                 || proof.is_some()
                 || active_cuts.is_some()
+                || has_merge_options
             {
                 return Err(
                     "incremental-loop does not accept --output, --model, --sat-exe, or --proof"
@@ -3078,11 +3637,12 @@ fn parse_options() -> Result<Mode, String> {
                 prefer_selected,
                 checkpoint_every,
                 symmetry_break,
+                topology_scope,
                 lazy_cuts,
             })
         }
         other => Err(format!(
-            "unknown command {other:?}; expected stats, emit, emit-active, decode, loop, or incremental-loop"
+            "unknown command {other:?}; expected stats, merge-checkpoints, emit, emit-active, decode, loop, or incremental-loop"
         )),
     }
 }
@@ -3091,16 +3651,19 @@ fn run_emit(
     checkpoint_path: &Path,
     output: &Path,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<(), String> {
     let checkpoint = load_checkpoint(checkpoint_path)?;
-    let (variables, clauses) = write_cnf(&checkpoint, output, symmetry_break)?;
+    let (variables, clauses) =
+        write_cnf_for_scope(&checkpoint, output, symmetry_break, topology_scope)?;
     println!(
-        "wrote {}: variables={variables} clauses={clauses} checkpoint_pairs={} unique_pair_cuts={} checkpoint_fnv1a64={:016x} symmetry_break={}",
+        "wrote {}: variables={variables} clauses={clauses} checkpoint_pairs={} unique_pair_cuts={} checkpoint_fnv1a64={:016x} symmetry_break={} topology_scope={}",
         output.display(),
         checkpoint.pairs.len(),
         checkpoint.cuts.len(),
         checkpoint.checksum,
-        symmetry_break.as_str()
+        symmetry_break.as_str(),
+        topology_scope.as_str()
     );
     Ok(())
 }
@@ -3110,20 +3673,29 @@ fn run_emit_active(
     active_cuts_path: &Path,
     output: &Path,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<(), String> {
     let checkpoint = load_checkpoint(checkpoint_path)?;
     let edges = directed_edges();
-    let active = load_active_cuts_manifest(active_cuts_path, &checkpoint, &edges, symmetry_break)?;
-    let (variables, clauses) = write_lazy_cnf(&checkpoint, &active, output, symmetry_break)?;
+    let active = load_active_cuts_manifest(
+        active_cuts_path,
+        &checkpoint,
+        &edges,
+        symmetry_break,
+        topology_scope,
+    )?;
+    let (variables, clauses) =
+        write_lazy_cnf_for_scope(&checkpoint, &active, output, symmetry_break, topology_scope)?;
     println!(
-        "wrote {}: variables={variables} clauses={clauses} checkpoint_pairs={} full_unique_pair_cuts={} active_pair_cuts={} checkpoint_fnv1a64={:016x} active_fnv1a64={:016x} symmetry_break={}",
+        "wrote {}: variables={variables} clauses={clauses} checkpoint_pairs={} full_unique_pair_cuts={} active_pair_cuts={} checkpoint_fnv1a64={:016x} active_fnv1a64={:016x} symmetry_break={} topology_scope={}",
         output.display(),
         checkpoint.pairs.len(),
         checkpoint.cuts.len(),
         active.indices.len(),
         checkpoint.checksum,
         active_cuts_checksum(&checkpoint, &active.indices)?,
-        symmetry_break.as_str()
+        symmetry_break.as_str(),
+        topology_scope.as_str()
     );
     Ok(())
 }
@@ -3140,38 +3712,126 @@ fn run_stats(checkpoint_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct CheckpointMergeStats {
+    input_pairs: usize,
+    added_pairs: usize,
+    duplicate_pairs: usize,
+    added_cuts: usize,
+}
+
+fn merge_checkpoint_data(
+    destination: &mut Checkpoint,
+    source: &Checkpoint,
+    edges: &[DirectedEdge],
+) -> Result<CheckpointMergeStats, String> {
+    if destination.budget != source.budget {
+        return Err(format!(
+            "cannot merge checkpoint budget {} into budget {}",
+            source.budget, destination.budget
+        ));
+    }
+    destination.reserve_for_append(source.pairs.len(), source.cuts.len())?;
+    let mut stats = CheckpointMergeStats {
+        input_pairs: source.pairs.len(),
+        ..CheckpointMergeStats::default()
+    };
+    for &pair in &source.pairs {
+        let witness = destination.pairs.len();
+        if !destination.insert_pair(pair)? {
+            stats.duplicate_pairs += 1;
+            continue;
+        }
+        stats.added_pairs += 1;
+        stats.added_cuts += usize::from(destination.insert_cut(pair_cut(&pair, edges), witness)?);
+    }
+    destination.checksum = pairs_checksum(&destination.pairs);
+    Ok(stats)
+}
+
+fn run_merge_checkpoints(
+    checkpoint_path: &Path,
+    merge_paths: &[PathBuf],
+    output: &Path,
+) -> Result<(), String> {
+    let output_lock = RunLock::acquire(output, "merged checkpoint")?;
+    let mut checkpoint = load_checkpoint(checkpoint_path)?;
+    let base_pairs = checkpoint.pairs.len();
+    let base_cuts = checkpoint.cuts.len();
+    let edges = directed_edges();
+    let mut total_added_pairs = 0usize;
+    let mut total_duplicate_pairs = 0usize;
+    let mut total_added_cuts = 0usize;
+    for (index, path) in merge_paths.iter().enumerate() {
+        let source = load_checkpoint(path)?;
+        let stats = merge_checkpoint_data(&mut checkpoint, &source, &edges)?;
+        total_added_pairs += stats.added_pairs;
+        total_duplicate_pairs += stats.duplicate_pairs;
+        total_added_cuts += stats.added_cuts;
+        println!(
+            "merge_input={} path={} input_pairs={} added_pairs={} duplicate_pairs={} added_unique_cuts={}",
+            index + 1,
+            path.display(),
+            stats.input_pairs,
+            stats.added_pairs,
+            stats.duplicate_pairs,
+            stats.added_cuts
+        );
+    }
+    write_checkpoint(&checkpoint, output)?;
+    println!(
+        "status=checkpoints-merged\nbase_checkpoint={}\nbase_pairs={base_pairs}\nbase_unique_cuts={base_cuts}\nmerge_inputs={}\nadded_pairs={total_added_pairs}\nduplicate_pairs={total_duplicate_pairs}\nadded_unique_cuts={total_added_cuts}\noutput={}\noutput_pairs={}\noutput_unique_cuts={}\noutput_fnv1a64={:016x}\nbase_preserved_as_exact_prefix=true\nfirst_cut_witness_semantics=first-pair-occurrence-v1\nwriter_lock={}",
+        checkpoint_path.display(),
+        merge_paths.len(),
+        output.display(),
+        checkpoint.pairs.len(),
+        checkpoint.cuts.len(),
+        checkpoint.checksum,
+        output_lock.path().display()
+    );
+    Ok(())
+}
+
 fn run_decode(
     checkpoint_path: &Path,
     model: &Path,
     output: Option<&Path>,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<(), String> {
     let checkpoint = load_checkpoint(checkpoint_path)?;
     let text = fs::read_to_string(model)
         .map_err(|error| format!("cannot read model {}: {error}", model.display()))?;
-    let result = parse_sat_result(&text)?;
+    let result = parse_sat_result(&text, topology_scope.variable_count())?;
     let rendered = match result.status {
         SatStatus::Satisfiable => {
             let edges = directed_edges();
-            let base = base_clauses(&edges, symmetry_break);
-            let candidate = decode_candidate_with_base(
+            let base = base_clauses_for_scope(&edges, symmetry_break, topology_scope);
+            let candidate = decode_candidate_with_scope_and_base(
                 &checkpoint.cuts,
                 result.assignment.as_deref().expect("SAT has assignment"),
                 &edges,
                 &base,
+                topology_scope,
             )?;
             format!(
-                "{}symmetry_break={}\n",
+                "{}symmetry_break={}\ntopology_scope={}\n",
                 format_candidate(&candidate, &edges),
-                symmetry_break.as_str()
+                symmetry_break.as_str(),
+                topology_scope.as_str()
             )
         }
         SatStatus::Unsatisfiable => {
-            format!("status=unsat\nsymmetry_break={}\n", symmetry_break.as_str())
+            format!(
+                "status=unsat\nsymmetry_break={}\ntopology_scope={}\n",
+                symmetry_break.as_str(),
+                topology_scope.as_str()
+            )
         }
         SatStatus::Unknown => format!(
-            "status=unknown\nsymmetry_break={}\n",
-            symmetry_break.as_str()
+            "status=unknown\nsymmetry_break={}\ntopology_scope={}\n",
+            symmetry_break.as_str(),
+            topology_scope.as_str()
         ),
     };
     if let Some(output) = output {
@@ -3194,19 +3854,28 @@ fn run_loop(
     max_iterations: usize,
     conflicts: Option<u64>,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
 ) -> Result<(), String> {
     let mut checkpoint = load_checkpoint_with_reserve(checkpoint_path, max_iterations)?;
     let edges = directed_edges();
-    let base = base_clauses(&edges, symmetry_break);
-    let (_, mut clauses) = write_cnf(&checkpoint, cnf, symmetry_break)?;
+    let base = base_clauses_for_scope(&edges, symmetry_break, topology_scope);
+    let (_, mut clauses) = write_cnf_for_scope(&checkpoint, cnf, symmetry_break, topology_scope)?;
     for iteration in 0..max_iterations {
         eprintln!(
-            "topology-loop iteration={iteration} pairs={} unique_cuts={} clauses={clauses} symmetry_break={}",
+            "topology-loop iteration={iteration} pairs={} unique_cuts={} clauses={clauses} symmetry_break={} topology_scope={}",
             checkpoint.pairs.len(),
             checkpoint.cuts.len(),
-            symmetry_break.as_str()
+            symmetry_break.as_str(),
+            topology_scope.as_str()
         );
-        let sat = invoke_sat(sat_exe, cnf, model, proof, conflicts)?;
+        let sat = invoke_sat(
+            sat_exe,
+            cnf,
+            model,
+            proof,
+            conflicts,
+            topology_scope.variable_count(),
+        )?;
         if sat.status != SatStatus::Unsatisfiable
             && let Some(proof) = proof
             && proof.exists()
@@ -3222,11 +3891,12 @@ fn run_loop(
             SatStatus::Unknown => {
                 write_checkpoint(&checkpoint, next_checkpoint)?;
                 println!(
-                    "status=inconclusive-sat-limit\nproof_certified=false\nglobal_19c_conclusion=false\niterations={}\npairs={}\ncheckpoint={}\nsymmetry_break={}\n",
+                    "status=inconclusive-sat-limit\nproof_certified=false\nglobal_19c_conclusion=false\niterations={}\npairs={}\ncheckpoint={}\nsymmetry_break={}\ntopology_scope={}\n",
                     iteration + 1,
                     checkpoint.pairs.len(),
                     next_checkpoint.display(),
-                    symmetry_break.as_str()
+                    symmetry_break.as_str(),
+                    topology_scope.as_str()
                 );
                 println!("checkpoint_fnv1a64={:016x}", checkpoint.checksum);
                 return Ok(());
@@ -3240,7 +3910,7 @@ fn run_loop(
                     "produce-and-independently-verify-static-proof"
                 };
                 println!(
-                    "status=static-topology-unsat-provisional\nproof_certified=false\nglobal_19c_conclusion=false\nnext_action={}\niterations={}\npairs={}\ncheckpoint={}\nproof={}\nproof_artifact_present={}\nsymmetry_break={}\nnegative_exclusion_requires_symmetry_orbit_lemma={}\n",
+                    "status=static-topology-unsat-provisional\nproof_certified=false\nglobal_19c_conclusion=false\nnext_action={}\niterations={}\npairs={}\ncheckpoint={}\nproof={}\nproof_artifact_present={}\nsymmetry_break={}\ntopology_scope={}\nnegative_exclusion_requires_symmetry_orbit_lemma={}\n",
                     next_action,
                     iteration + 1,
                     checkpoint.pairs.len(),
@@ -3248,6 +3918,7 @@ fn run_loop(
                     proof.map_or_else(|| "none".to_string(), |path| path.display().to_string()),
                     proof_artifact_present,
                     symmetry_break.as_str(),
+                    topology_scope.as_str(),
                     symmetry_break != SymmetryBreak::None
                 );
                 println!("checkpoint_fnv1a64={:016x}", checkpoint.checksum);
@@ -3256,11 +3927,12 @@ fn run_loop(
             SatStatus::Satisfiable => {}
         }
 
-        let candidate = decode_candidate_with_base(
+        let candidate = decode_candidate_with_scope_and_base(
             &checkpoint.cuts,
             sat.assignment.as_deref().expect("SAT has assignment"),
             &edges,
             &base,
+            topology_scope,
         )?;
         eprintln!(
             "topology-loop iteration={iteration} selected={} covered={} thermometers={}",
@@ -3285,17 +3957,16 @@ fn run_loop(
                 println!("positive_witness_recheckable=true");
                 println!("global_19c_conclusion=true");
                 println!("conclusion=at-most-19c-existence-witness");
-                println!(
-                    "search_scope=classic-sudoku-plus-nonoverlapping-king-step-thermometers-at-most-19-covered-cells"
-                );
+                println!("search_scope={}", topology_scope.search_scope());
                 print!("{}", format_candidate_body(&candidate, &edges));
                 println!(
-                    "iterations={}\npairs={}\ncheckpoint={}\noracle_nodes={}\nsymmetry_break={}\n",
+                    "iterations={}\npairs={}\ncheckpoint={}\noracle_nodes={}\nsymmetry_break={}\ntopology_scope={}\n",
                     iteration + 1,
                     checkpoint.pairs.len(),
                     next_checkpoint.display(),
                     solve.stats.nodes,
-                    symmetry_break.as_str()
+                    symmetry_break.as_str(),
+                    topology_scope.as_str()
                 );
                 println!("checkpoint_fnv1a64={:016x}", checkpoint.checksum);
                 return Ok(());
@@ -3337,6 +4008,7 @@ fn run_loop(
                     &checkpoint,
                     &pair,
                     symmetry_break,
+                    topology_scope,
                 )?;
                 clauses += 1;
                 write_checkpoint(&checkpoint, next_checkpoint)?;
@@ -3350,10 +4022,11 @@ fn run_loop(
         }
     }
     println!(
-        "status=iteration-limit\nproof_certified=false\nglobal_19c_conclusion=false\niterations={max_iterations}\npairs={}\ncheckpoint={}\nsymmetry_break={}\n",
+        "status=iteration-limit\nproof_certified=false\nglobal_19c_conclusion=false\niterations={max_iterations}\npairs={}\ncheckpoint={}\nsymmetry_break={}\ntopology_scope={}\n",
         checkpoint.pairs.len(),
         next_checkpoint.display(),
-        symmetry_break.as_str()
+        symmetry_break.as_str(),
+        topology_scope.as_str()
     );
     println!("checkpoint_fnv1a64={:016x}", checkpoint.checksum);
     Ok(())
@@ -3382,12 +4055,14 @@ fn checkpoint_due(dirty_refinement_batches: usize, checkpoint_every: usize) -> b
     dirty_refinement_batches >= checkpoint_every
 }
 
+#[allow(clippy::too_many_arguments)]
 fn persist_incremental_state(
     checkpoint: &Checkpoint,
     next_checkpoint: &Path,
     lazy: Option<&LazyCutRuntime>,
     cnf: &Path,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
     checkpoint_dirty: bool,
     rewrite_lazy_cnf: bool,
 ) -> Result<Option<f64>, String> {
@@ -3406,9 +4081,16 @@ fn persist_incremental_state(
             &lazy.active,
             &lazy.options.manifest,
             symmetry_break,
+            topology_scope,
         )?;
         if rewrite_lazy_cnf {
-            write_lazy_cnf(checkpoint, &lazy.active, cnf, symmetry_break)?;
+            write_lazy_cnf_for_scope(
+                checkpoint,
+                &lazy.active,
+                cnf,
+                symmetry_break,
+                topology_scope,
+            )?;
         }
     }
     Ok(checkpoint_write_ms)
@@ -3422,6 +4104,7 @@ fn preserve_incremental_progress_error(
     lazy: Option<&LazyCutRuntime>,
     cnf: &Path,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
     error: String,
 ) -> String {
     if !dirty && lazy.is_none() {
@@ -3434,6 +4117,7 @@ fn preserve_incremental_progress_error(
             lazy,
             cnf,
             symmetry_break,
+            topology_scope,
             true,
             false,
         )
@@ -3444,6 +4128,7 @@ fn preserve_incremental_progress_error(
             &lazy.active,
             &lazy.options.manifest,
             symmetry_break,
+            topology_scope,
         )
     } else {
         Ok(())
@@ -3581,6 +4266,7 @@ fn print_incremental_metadata(
     oracle_batch: usize,
     pair_mode: PairMode,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
     checkpoint_every: usize,
     lazy: Option<&LazyCutRuntime>,
     sat_solves: usize,
@@ -3589,7 +4275,7 @@ fn print_incremental_metadata(
     checkpoint_write_metrics: CheckpointWriteMetrics,
     elapsed_seconds: f64,
 ) {
-    println!("cnf_schema={CNF_SCHEMA}");
+    println!("cnf_schema={}", topology_scope.cnf_schema());
     println!("bridge_protocol={BRIDGE_PROTOCOL}");
     println!("bridge_executable={}", bridge.executable.display());
     println!("cadical_signature={}", bridge.metadata.cadical);
@@ -3604,6 +4290,7 @@ fn print_incremental_metadata(
     println!("oracle_batch={oracle_batch}");
     println!("pair_mode={}", pair_mode.as_str());
     println!("symmetry_break={}", symmetry_break.as_str());
+    println!("topology_scope={}", topology_scope.as_str());
     println!("checkpoint_atomic=true");
     println!(
         "checkpoint_writer_lock={}",
@@ -3677,6 +4364,7 @@ fn run_incremental_loop(
     prefer_selected: bool,
     checkpoint_every: usize,
     symmetry_break: SymmetryBreak,
+    topology_scope: TopologyScope,
     lazy_options: Option<LazyCutOptions>,
 ) -> Result<(), String> {
     let run_started = Instant::now();
@@ -3687,12 +4375,18 @@ fn run_incremental_loop(
     let mut checkpoint = load_checkpoint_with_reserve(checkpoint_path, reserve_pairs)?;
     let load_ms = milliseconds(load_started);
     let edges = directed_edges();
-    let base = base_clauses(&edges, symmetry_break);
+    let base = base_clauses_for_scope(&edges, symmetry_break, topology_scope);
 
     let mut lazy = if let Some(options) = lazy_options {
         let manifest_lock = RunLock::acquire(&options.manifest, "active-cut manifest")?;
         let mut active = if options.manifest.exists() {
-            load_active_cuts_manifest(&options.manifest, &checkpoint, &edges, symmetry_break)?
+            load_active_cuts_manifest(
+                &options.manifest,
+                &checkpoint,
+                &edges,
+                symmetry_break,
+                topology_scope,
+            )?
         } else {
             ActiveCutPool::from_indices(checkpoint.cuts.len(), Vec::new())?
         };
@@ -3721,20 +4415,33 @@ fn run_incremental_loop(
             &lazy.active,
             &lazy.options.manifest,
             symmetry_break,
+            topology_scope,
         )?;
     }
     let cnf_started = Instant::now();
     let (_, clauses) = if let Some(lazy) = &lazy {
-        write_lazy_cnf(&checkpoint, &lazy.active, cnf, symmetry_break)?
+        write_lazy_cnf_for_scope(
+            &checkpoint,
+            &lazy.active,
+            cnf,
+            symmetry_break,
+            topology_scope,
+        )?
     } else {
-        write_cnf(&checkpoint, cnf, symmetry_break)?
+        write_cnf_for_scope(&checkpoint, cnf, symmetry_break, topology_scope)?
     };
     let cnf_ms = milliseconds(cnf_started);
     let bridge_started = Instant::now();
-    let mut bridge = IncrementalBridge::spawn(bridge_exe, cnf, clauses, prefer_selected)?;
+    let mut bridge = IncrementalBridge::spawn(
+        bridge_exe,
+        cnf,
+        topology_scope.variable_count() as usize,
+        clauses,
+        prefer_selected,
+    )?;
     let bridge_ready_ms = milliseconds(bridge_started);
     eprintln!(
-        "incremental-topology ready pairs={} unique_cuts={} active_cuts={} cut_pool_mode={} clauses={} load_ms={load_ms:.3} cnf_ms={cnf_ms:.3} initial_checkpoint_ms={initial_checkpoint_ms:.3} bridge_ready_ms={bridge_ready_ms:.3} cadical={} revision={} library_sha256={} prefer_selected={} symmetry_break={}",
+        "incremental-topology ready pairs={} unique_cuts={} active_cuts={} cut_pool_mode={} clauses={} load_ms={load_ms:.3} cnf_ms={cnf_ms:.3} initial_checkpoint_ms={initial_checkpoint_ms:.3} bridge_ready_ms={bridge_ready_ms:.3} cadical={} revision={} library_sha256={} prefer_selected={} symmetry_break={} topology_scope={}",
         checkpoint.pairs.len(),
         checkpoint.cuts.len(),
         lazy.as_ref()
@@ -3749,7 +4456,8 @@ fn run_incremental_loop(
         bridge.metadata.revision,
         bridge.metadata.library_sha256,
         bridge.metadata.prefer_selected,
-        symmetry_break.as_str()
+        symmetry_break.as_str(),
+        topology_scope.as_str()
     );
 
     let mut dirty_refinement_batches = 0usize;
@@ -3778,6 +4486,7 @@ fn run_incremental_loop(
                     lazy.as_ref(),
                     cnf,
                     symmetry_break,
+                    topology_scope,
                     error,
                 )
             })?;
@@ -3794,6 +4503,7 @@ fn run_incremental_loop(
                         lazy.as_ref(),
                         cnf,
                         symmetry_break,
+                        topology_scope,
                         dirty_refinement_batches != 0,
                         true,
                     )?;
@@ -3824,6 +4534,7 @@ fn run_incremental_loop(
                         oracle_batch,
                         pair_mode,
                         symmetry_break,
+                        topology_scope,
                         checkpoint_every,
                         lazy.as_ref(),
                         sat_solves,
@@ -3842,6 +4553,7 @@ fn run_incremental_loop(
                         lazy.as_ref(),
                         cnf,
                         symmetry_break,
+                        topology_scope,
                         dirty_refinement_batches != 0,
                         true,
                     )?;
@@ -3880,6 +4592,7 @@ fn run_incremental_loop(
                         oracle_batch,
                         pair_mode,
                         symmetry_break,
+                        topology_scope,
                         checkpoint_every,
                         lazy.as_ref(),
                         sat_solves,
@@ -3901,6 +4614,7 @@ fn run_incremental_loop(
                     lazy.as_ref(),
                     cnf,
                     symmetry_break,
+                    topology_scope,
                     "bridge SAT result has no assignment".into(),
                 )
             })?;
@@ -3914,18 +4628,25 @@ fn run_incremental_loop(
             });
             let required_cuts = active_cuts.as_deref().unwrap_or(&checkpoint.cuts);
             let decode_validation_started = Instant::now();
-            let candidate = decode_candidate_with_base(required_cuts, assignment, &edges, &base)
-                .map_err(|error| {
-                    preserve_incremental_progress_error(
-                        &checkpoint,
-                        next_checkpoint,
-                        dirty_refinement_batches != 0,
-                        lazy.as_ref(),
-                        cnf,
-                        symmetry_break,
-                        error,
-                    )
-                })?;
+            let candidate = decode_candidate_with_scope_and_base(
+                required_cuts,
+                assignment,
+                &edges,
+                &base,
+                topology_scope,
+            )
+            .map_err(|error| {
+                preserve_incremental_progress_error(
+                    &checkpoint,
+                    next_checkpoint,
+                    dirty_refinement_batches != 0,
+                    lazy.as_ref(),
+                    cnf,
+                    symmetry_break,
+                    topology_scope,
+                    error,
+                )
+            })?;
             let decode_validation_ms = milliseconds(decode_validation_started);
             total_decode_validation_ms += decode_validation_ms;
             let selected_mask = selected_edge_mask(assignment);
@@ -3956,6 +4677,7 @@ fn run_incremental_loop(
                                     lazy.as_ref(),
                                     cnf,
                                     symmetry_break,
+                                    topology_scope,
                                     error,
                                 )
                             })?;
@@ -3996,6 +4718,7 @@ fn run_incremental_loop(
                 lazy.as_ref(),
                 cnf,
                 symmetry_break,
+                topology_scope,
                 format!("cannot build exact thermo batch oracle: {error}"),
             )
         })?;
@@ -4011,6 +4734,7 @@ fn run_incremental_loop(
                 lazy.as_ref(),
                 cnf,
                 symmetry_break,
+                topology_scope,
                 error,
             )
         })?;
@@ -4028,6 +4752,7 @@ fn run_incremental_loop(
                 lazy.as_ref(),
                 cnf,
                 symmetry_break,
+                topology_scope,
                 error,
             )
         })?;
@@ -4041,6 +4766,7 @@ fn run_incremental_loop(
                 lazy.as_ref(),
                 cnf,
                 symmetry_break,
+                topology_scope,
                 dirty_refinement_batches != 0,
                 true,
             )?;
@@ -4051,9 +4777,7 @@ fn run_incremental_loop(
             println!("positive_witness_recheckable=true");
             println!("global_19c_conclusion=true");
             println!("conclusion=at-most-19c-existence-witness");
-            println!(
-                "search_scope=classic-sudoku-plus-nonoverlapping-king-step-thermometers-at-most-19-covered-cells"
-            );
+            println!("search_scope={}", topology_scope.search_scope());
             print!("{}", format_candidate_body(&candidate, &edges));
             println!("classification=exact-unique");
             println!("iterations={}", iteration + 1);
@@ -4079,6 +4803,7 @@ fn run_incremental_loop(
                 oracle_batch,
                 pair_mode,
                 symmetry_break,
+                topology_scope,
                 checkpoint_every,
                 lazy.as_ref(),
                 sat_solves,
@@ -4104,6 +4829,7 @@ fn run_incremental_loop(
                         lazy.as_ref(),
                         cnf,
                         symmetry_break,
+                        topology_scope,
                         error,
                     )
                 },
@@ -4116,6 +4842,7 @@ fn run_incremental_loop(
                 lazy.as_ref(),
                 cnf,
                 symmetry_break,
+                topology_scope,
                 "thermo alternatives produced no new unique pair cut".into(),
             ));
         }
@@ -4155,6 +4882,7 @@ fn run_incremental_loop(
                     lazy.as_ref(),
                     cnf,
                     symmetry_break,
+                    topology_scope,
                     "new oracle cuts were not all violated by the checked topology".into(),
                 ));
             }
@@ -4177,6 +4905,7 @@ fn run_incremental_loop(
                             lazy.as_ref(),
                             cnf,
                             symmetry_break,
+                            topology_scope,
                             error,
                         )
                     })?;
@@ -4195,6 +4924,7 @@ fn run_incremental_loop(
                 &checkpoint,
                 &refinement.cuts,
                 symmetry_break,
+                topology_scope,
             ) {
                 return Err(preserve_incremental_progress_error(
                     &checkpoint,
@@ -4203,6 +4933,7 @@ fn run_incremental_loop(
                     lazy.as_ref(),
                     cnf,
                     symmetry_break,
+                    topology_scope,
                     error,
                 ));
             }
@@ -4215,6 +4946,7 @@ fn run_incremental_loop(
                         lazy.as_ref(),
                         cnf,
                         symmetry_break,
+                        topology_scope,
                         error,
                     ));
                 }
@@ -4228,6 +4960,7 @@ fn run_incremental_loop(
                 lazy.as_ref(),
                 cnf,
                 symmetry_break,
+                topology_scope,
                 true,
                 false,
             )?;
@@ -4264,6 +4997,7 @@ fn run_incremental_loop(
         lazy.as_ref(),
         cnf,
         symmetry_break,
+        topology_scope,
         dirty_refinement_batches != 0,
         true,
     )?;
@@ -4301,6 +5035,7 @@ fn run_incremental_loop(
         oracle_batch,
         pair_mode,
         symmetry_break,
+        topology_scope,
         checkpoint_every,
         lazy.as_ref(),
         sat_solves,
@@ -4315,23 +5050,43 @@ fn run_incremental_loop(
 fn run() -> Result<(), String> {
     match parse_options()? {
         Mode::Stats { checkpoint } => run_stats(&checkpoint),
+        Mode::MergeCheckpoints {
+            checkpoint,
+            merge_checkpoints,
+            output,
+        } => run_merge_checkpoints(&checkpoint, &merge_checkpoints, &output),
         Mode::Emit {
             checkpoint,
             output,
             symmetry_break,
-        } => run_emit(&checkpoint, &output, symmetry_break),
+            topology_scope,
+        } => run_emit(&checkpoint, &output, symmetry_break, topology_scope),
         Mode::EmitActive {
             checkpoint,
             active_cuts,
             output,
             symmetry_break,
-        } => run_emit_active(&checkpoint, &active_cuts, &output, symmetry_break),
+            topology_scope,
+        } => run_emit_active(
+            &checkpoint,
+            &active_cuts,
+            &output,
+            symmetry_break,
+            topology_scope,
+        ),
         Mode::Decode {
             checkpoint,
             model,
             output,
             symmetry_break,
-        } => run_decode(&checkpoint, &model, output.as_deref(), symmetry_break),
+            topology_scope,
+        } => run_decode(
+            &checkpoint,
+            &model,
+            output.as_deref(),
+            symmetry_break,
+            topology_scope,
+        ),
         Mode::Loop {
             checkpoint,
             next_checkpoint,
@@ -4342,6 +5097,7 @@ fn run() -> Result<(), String> {
             max_iterations,
             conflicts,
             symmetry_break,
+            topology_scope,
         } => run_loop(
             &checkpoint,
             &next_checkpoint,
@@ -4352,6 +5108,7 @@ fn run() -> Result<(), String> {
             max_iterations,
             conflicts,
             symmetry_break,
+            topology_scope,
         ),
         Mode::IncrementalLoop {
             checkpoint,
@@ -4365,6 +5122,7 @@ fn run() -> Result<(), String> {
             prefer_selected,
             checkpoint_every,
             symmetry_break,
+            topology_scope,
             lazy_cuts,
         } => run_incremental_loop(
             &checkpoint,
@@ -4378,6 +5136,7 @@ fn run() -> Result<(), String> {
             prefer_selected,
             checkpoint_every,
             symmetry_break,
+            topology_scope,
             lazy_cuts,
         ),
     }
@@ -4440,6 +5199,76 @@ mod tests {
                 assignment[sequential_var(prefix, count) as usize] = occupied > count;
             }
         }
+        assignment
+    }
+
+    fn assign_exact_counter(
+        assignment: &mut [bool],
+        variables: &[i32],
+        count: usize,
+        base: i32,
+    ) -> i32 {
+        let width = count + 1;
+        let mut true_inputs = 0usize;
+        for (prefix, &variable) in variables.iter().enumerate() {
+            true_inputs += usize::from(assignment[variable as usize]);
+            for threshold in 1..=width {
+                assignment[exact_counter_var(base, prefix, threshold, width) as usize] =
+                    true_inputs >= threshold;
+            }
+        }
+        base + (variables.len() * width) as i32
+    }
+
+    fn assignment_for_exact_982(paths: &[Vec<u8>], edges: &[DirectedEdge]) -> Vec<bool> {
+        let grid = Solver::blank(paths).unwrap().enumerate_up_to(1).solutions[0];
+        let mut assignment = vec![false; EXACT_982_VARIABLE_COUNT as usize + 1];
+        for (cell, &digit) in grid.iter().enumerate() {
+            assignment[digit_var(cell, digit as usize - 1) as usize] = true;
+        }
+        for path in paths {
+            for &cell in path {
+                assignment[occupied_var(cell as usize) as usize] = true;
+            }
+            for step in path.windows(2) {
+                let id = edge_id(edges, step[0] as usize, step[1] as usize);
+                assignment[edge_var(id) as usize] = true;
+                let lower_digit = grid[step[0] as usize];
+                let upper_digit = grid[step[1] as usize];
+                if upper_digit == lower_digit + 1 {
+                    assignment[swap_var(lower_digit as usize - 1, id) as usize] = true;
+                }
+            }
+            assignment[exact_982_source_var(path[0] as usize) as usize] = true;
+            let label = match path.len() {
+                9 => 0,
+                8 => 1,
+                2 => 2,
+                length => panic!("unexpected exact-982 test path length {length}"),
+            };
+            for &cell in path {
+                assignment[exact_982_label_var(label, cell as usize) as usize] = true;
+            }
+        }
+
+        let mut occupied = 0usize;
+        for prefix in 0..CELLS - 1 {
+            occupied += usize::from(assignment[occupied_var(prefix) as usize]);
+            for count in 0..COVER_LIMIT {
+                assignment[sequential_var(prefix, count) as usize] = occupied > count;
+            }
+        }
+
+        let mut counter_base = EXACT_982_COUNTER_BASE;
+        for (label, count) in [(0, 9), (1, 8), (2, 2)] {
+            let variables = (0..CELLS)
+                .map(|cell| exact_982_label_var(label, cell))
+                .collect::<Vec<_>>();
+            counter_base = assign_exact_counter(&mut assignment, &variables, count, counter_base);
+        }
+        let sources = (0..CELLS).map(exact_982_source_var).collect::<Vec<_>>();
+        counter_base = assign_exact_counter(&mut assignment, &sources, 3, counter_base);
+        assert_eq!(counter_base - 1, EXACT_982_VARIABLE_COUNT);
         assignment
     }
 
@@ -4553,7 +5382,7 @@ mod tests {
     }
 
     fn format_complete_model(assignment: &[bool]) -> String {
-        let literals = (1..=VARIABLE_COUNT as usize)
+        let literals = (1..assignment.len())
             .map(|variable| {
                 if assignment[variable] {
                     variable.to_string()
@@ -4567,7 +5396,7 @@ mod tests {
     }
 
     fn format_bridge_model(assignment: &[bool]) -> String {
-        let literals = (1..=VARIABLE_COUNT as usize)
+        let literals = (1..assignment.len())
             .map(|variable| {
                 if assignment[variable] {
                     variable.to_string()
@@ -4610,6 +5439,96 @@ mod tests {
             base_clauses(&edges, SymmetryBreak::None).len(),
             BASE_CLAUSE_COUNT
         );
+    }
+
+    #[test]
+    fn exact_982_variable_ranges_and_clause_count_are_stable() {
+        assert_eq!(EXACT_982_LABEL_BASE, 7227);
+        assert_eq!(exact_982_label_var(2, 80), 7469);
+        assert_eq!(EXACT_982_SOURCE_BASE, 7470);
+        assert_eq!(exact_982_source_var(80), 7550);
+        assert_eq!(EXACT_982_COUNTER_BASE, 7551);
+        assert_eq!(EXACT_982_VARIABLE_COUNT, 9656);
+        let edges = directed_edges();
+        assert_eq!(
+            base_clauses_for_scope(&edges, SymmetryBreak::None, TopologyScope::Exact982).len(),
+            BASE_CLAUSE_COUNT + EXACT_982_EXTRA_CLAUSE_COUNT
+        );
+        assert_eq!(
+            base_clauses_for_scope(
+                &edges,
+                SymmetryBreak::D4ComplementV1,
+                TopologyScope::Exact982,
+            )
+            .len(),
+            BASE_CLAUSE_COUNT + EXACT_982_EXTRA_CLAUSE_COUNT + 148
+        );
+    }
+
+    #[test]
+    fn exact_cardinality_counter_truth_table_is_exact() {
+        let variables = [1, 2, 3, 4];
+        let base = 5;
+        let mut clauses = Vec::new();
+        let next = exact_cardinality_clauses(&mut clauses, &variables, 2, base);
+        assert_eq!(next, 17);
+        let mut satisfiable_inputs = [false; 16];
+        for bits in 0u32..(1 << 16) {
+            let assignment = (0..=16)
+                .map(|variable| variable != 0 && bits & (1 << (variable - 1)) != 0)
+                .collect::<Vec<_>>();
+            if clauses
+                .iter()
+                .all(|clause| clause_satisfied(clause, &assignment))
+            {
+                satisfiable_inputs[(bits & 0x0f) as usize] = true;
+            }
+        }
+        for (inputs, &satisfiable) in satisfiable_inputs.iter().enumerate() {
+            assert_eq!(satisfiable, inputs.count_ones() == 2, "inputs={inputs:04b}");
+        }
+    }
+
+    #[test]
+    fn known_three_solution_982_layout_satisfies_and_decodes_exact_master() {
+        let paths = KNOWN_THREE_19
+            .iter()
+            .map(|path| path.to_vec())
+            .collect::<Vec<_>>();
+        let edges = directed_edges();
+        let base = base_clauses_for_scope(&edges, SymmetryBreak::None, TopologyScope::Exact982);
+        let assignment = assignment_for_exact_982(&paths, &edges);
+        assert!(
+            base.iter()
+                .all(|clause| clause_satisfied(clause, &assignment))
+        );
+        let parsed = parse_sat_result(
+            &format_complete_model(&assignment),
+            EXACT_982_VARIABLE_COUNT,
+        )
+        .unwrap();
+        assert_eq!(parsed.assignment.as_deref(), Some(assignment.as_slice()));
+        assert_eq!(
+            parse_bridge_model(
+                &format_bridge_model(&assignment),
+                EXACT_982_VARIABLE_COUNT as usize,
+            )
+            .unwrap(),
+            assignment
+        );
+        let decoded = decode_candidate_with_scope_and_base(
+            &[],
+            &assignment,
+            &edges,
+            &base,
+            TopologyScope::Exact982,
+        )
+        .unwrap();
+        let mut lengths = decoded.paths.iter().map(Vec::len).collect::<Vec<_>>();
+        lengths.sort_unstable();
+        assert_eq!(lengths, [2, 8, 9]);
+        assert_eq!(decoded.covered_cells, 19);
+        assert_eq!(decoded.selected.len(), 16);
     }
 
     #[test]
@@ -4704,12 +5623,31 @@ mod tests {
             let manifest = temporary_path(&format!("active-{symmetry:?}"));
             let first_cnf = temporary_path(&format!("active-first-{symmetry:?}.cnf"));
             let second_cnf = temporary_path(&format!("active-second-{symmetry:?}.cnf"));
-            write_active_cuts_manifest(&checkpoint, &active, &manifest, symmetry).unwrap();
-            let loaded =
-                load_active_cuts_manifest(&manifest, &checkpoint, &edges, symmetry).unwrap();
+            write_active_cuts_manifest(
+                &checkpoint,
+                &active,
+                &manifest,
+                symmetry,
+                TopologyScope::AtMost19,
+            )
+            .unwrap();
+            let loaded = load_active_cuts_manifest(
+                &manifest,
+                &checkpoint,
+                &edges,
+                symmetry,
+                TopologyScope::AtMost19,
+            )
+            .unwrap();
             assert_eq!(loaded, active);
-            let loaded_from_descendant =
-                load_active_cuts_manifest(&manifest, &descendant, &edges, symmetry).unwrap();
+            let loaded_from_descendant = load_active_cuts_manifest(
+                &manifest,
+                &descendant,
+                &edges,
+                symmetry,
+                TopologyScope::AtMost19,
+            )
+            .unwrap();
             assert_eq!(loaded_from_descendant.indices, vec![0]);
             assert_eq!(loaded_from_descendant.mask, vec![true, false]);
             let (_, first_clauses) =
@@ -4735,6 +5673,7 @@ mod tests {
                     } else {
                         SymmetryBreak::None
                     },
+                    TopologyScope::AtMost19,
                 )
                 .is_err()
             );
@@ -4745,13 +5684,110 @@ mod tests {
 
         let ahead_manifest = temporary_path("active-ahead");
         let ahead = ActiveCutPool::from_indices(descendant.cuts.len(), vec![0, 1]).unwrap();
-        write_active_cuts_manifest(&descendant, &ahead, &ahead_manifest, SymmetryBreak::None)
-            .unwrap();
+        write_active_cuts_manifest(
+            &descendant,
+            &ahead,
+            &ahead_manifest,
+            SymmetryBreak::None,
+            TopologyScope::AtMost19,
+        )
+        .unwrap();
         assert!(
-            load_active_cuts_manifest(&ahead_manifest, &checkpoint, &edges, SymmetryBreak::None,)
-                .is_err()
+            load_active_cuts_manifest(
+                &ahead_manifest,
+                &checkpoint,
+                &edges,
+                SymmetryBreak::None,
+                TopologyScope::AtMost19,
+            )
+            .is_err()
         );
         fs::remove_file(ahead_manifest).unwrap();
+    }
+
+    #[test]
+    fn exact_scope_artifacts_are_bound_and_generic_cnf_bytes_are_unchanged() {
+        let checkpoint = empty_checkpoint();
+        let generic = temporary_path("generic-direct.cnf");
+        let dispatched = temporary_path("generic-dispatched.cnf");
+        let exact = temporary_path("exact-982.cnf");
+        write_cnf(&checkpoint, &generic, SymmetryBreak::None).unwrap();
+        write_cnf_for_scope(
+            &checkpoint,
+            &dispatched,
+            SymmetryBreak::None,
+            TopologyScope::AtMost19,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&generic).unwrap(), fs::read(&dispatched).unwrap());
+        let (variables, clauses) = write_cnf_for_scope(
+            &checkpoint,
+            &exact,
+            SymmetryBreak::None,
+            TopologyScope::Exact982,
+        )
+        .unwrap();
+        assert_eq!(variables, EXACT_982_VARIABLE_COUNT as usize);
+        assert_eq!(clauses, BASE_CLAUSE_COUNT + EXACT_982_EXTRA_CLAUSE_COUNT);
+        let exact_text = fs::read_to_string(&exact).unwrap();
+        assert!(exact_text.starts_with(&format!("c {EXACT_982_CNF_SCHEMA}\n")));
+        assert!(exact_text.contains("c topology_scope exact-9+8+2\n"));
+        assert!(exact_text.contains("p cnf 9656 69959\n"));
+        fs::remove_file(generic).unwrap();
+        fs::remove_file(dispatched).unwrap();
+        fs::remove_file(exact).unwrap();
+
+        let first = parse_grid(CANONICAL).unwrap();
+        let pair = GridPair::new(first, swap_symbols(first, 1, 2)).unwrap();
+        let checkpoint = checkpoint_from_pairs(vec![pair]);
+        let active = ActiveCutPool::from_indices(1, vec![0]).unwrap();
+        let generic_manifest = temporary_path("generic.active");
+        let exact_manifest = temporary_path("exact.active");
+        write_active_cuts_manifest(
+            &checkpoint,
+            &active,
+            &generic_manifest,
+            SymmetryBreak::None,
+            TopologyScope::AtMost19,
+        )
+        .unwrap();
+        write_active_cuts_manifest(
+            &checkpoint,
+            &active,
+            &exact_manifest,
+            SymmetryBreak::None,
+            TopologyScope::Exact982,
+        )
+        .unwrap();
+        let generic_text = fs::read_to_string(&generic_manifest).unwrap();
+        let exact_text = fs::read_to_string(&exact_manifest).unwrap();
+        assert!(generic_text.starts_with(&format!("{ACTIVE_CUTS_HEADER}\n")));
+        assert!(!generic_text.contains("# topology_scope="));
+        assert!(exact_text.starts_with(&format!("{ACTIVE_CUTS_HEADER_V2}\n")));
+        assert!(exact_text.contains("# topology_scope=exact-9+8+2\n"));
+        let edges = directed_edges();
+        assert!(
+            load_active_cuts_manifest(
+                &generic_manifest,
+                &checkpoint,
+                &edges,
+                SymmetryBreak::None,
+                TopologyScope::Exact982,
+            )
+            .is_err()
+        );
+        assert!(
+            load_active_cuts_manifest(
+                &exact_manifest,
+                &checkpoint,
+                &edges,
+                SymmetryBreak::None,
+                TopologyScope::AtMost19,
+            )
+            .is_err()
+        );
+        fs::remove_file(generic_manifest).unwrap();
+        fs::remove_file(exact_manifest).unwrap();
     }
 
     #[test]
@@ -4778,6 +5814,7 @@ mod tests {
             &durable_active,
             &manifest_path,
             SymmetryBreak::None,
+            TopologyScope::AtMost19,
         )
         .unwrap();
 
@@ -4787,8 +5824,14 @@ mod tests {
         let restarted = load_checkpoint(&checkpoint_path).unwrap();
         assert_eq!(restarted.pairs, durable.pairs);
         assert_eq!(
-            load_active_cuts_manifest(&manifest_path, &restarted, &edges, SymmetryBreak::None,)
-                .unwrap(),
+            load_active_cuts_manifest(
+                &manifest_path,
+                &restarted,
+                &edges,
+                SymmetryBreak::None,
+                TopologyScope::AtMost19,
+            )
+            .unwrap(),
             durable_active
         );
 
@@ -4797,9 +5840,14 @@ mod tests {
         // of the newly durable checkpoint, never an ahead reference.
         write_checkpoint(&in_memory, &checkpoint_path).unwrap();
         let restarted = load_checkpoint(&checkpoint_path).unwrap();
-        let prefix_active =
-            load_active_cuts_manifest(&manifest_path, &restarted, &edges, SymmetryBreak::None)
-                .unwrap();
+        let prefix_active = load_active_cuts_manifest(
+            &manifest_path,
+            &restarted,
+            &edges,
+            SymmetryBreak::None,
+            TopologyScope::AtMost19,
+        )
+        .unwrap();
         assert_eq!(prefix_active.indices, vec![0]);
         assert_eq!(prefix_active.mask, vec![true, false]);
 
@@ -4820,6 +5868,7 @@ mod tests {
             Some(&lazy),
             &cnf_path,
             SymmetryBreak::None,
+            TopologyScope::AtMost19,
             true,
             false,
         )
@@ -4828,8 +5877,14 @@ mod tests {
         let restarted = load_checkpoint(&checkpoint_path).unwrap();
         assert_eq!(restarted.pairs, in_memory.pairs);
         assert_eq!(
-            load_active_cuts_manifest(&manifest_path, &restarted, &edges, SymmetryBreak::None,)
-                .unwrap(),
+            load_active_cuts_manifest(
+                &manifest_path,
+                &restarted,
+                &edges,
+                SymmetryBreak::None,
+                TopologyScope::AtMost19,
+            )
+            .unwrap(),
             in_memory_active
         );
 
@@ -4843,6 +5898,7 @@ mod tests {
             Some(&lazy),
             &cnf_path,
             SymmetryBreak::None,
+            TopologyScope::AtMost19,
             false,
             true,
         )
@@ -4990,7 +6046,7 @@ mod tests {
     fn complete_model_decodes_to_stable_target_and_path() {
         let edges = directed_edges();
         let assignment = assignment_for_row_thermo(&edges);
-        let parsed = parse_sat_result(&format_complete_model(&assignment)).unwrap();
+        let parsed = parse_sat_result(&format_complete_model(&assignment), VARIABLE_COUNT).unwrap();
         assert_eq!(parsed.status, SatStatus::Satisfiable);
         let decoded =
             decode_candidate(&empty_checkpoint(), parsed.assignment.as_deref().unwrap()).unwrap();
@@ -5002,33 +6058,33 @@ mod tests {
 
     #[test]
     fn model_parser_rejects_partial_and_conflicting_assignments() {
-        assert!(parse_sat_result("s SATISFIABLE\nv 1 -2 0\n").is_err());
-        assert!(parse_sat_result("s SATISFIABLE\nv 1 -1 0\n").is_err());
-        assert!(parse_sat_result("s UNSATISFIABLE\nv 1 0\n").is_err());
+        assert!(parse_sat_result("s SATISFIABLE\nv 1 -2 0\n", VARIABLE_COUNT).is_err());
+        assert!(parse_sat_result("s SATISFIABLE\nv 1 -1 0\n", VARIABLE_COUNT).is_err());
+        assert!(parse_sat_result("s UNSATISFIABLE\nv 1 0\n", VARIABLE_COUNT).is_err());
     }
 
     #[test]
     fn bridge_ready_and_full_model_parsers_are_strict() {
         let ready = "READY thermo-cadical-bridge-v1 variables=7226 clauses=57400 cadical=cadical-2.1.3-f13d744 revision=f13d74439a5b5c963ac5b02d05ce93a8098018b8 library_sha256=6b97694f2c909a9de81eb7c130eccb9f7c41d57b3d66bf2cce5e851dea0518ed prefer_selected=1";
-        let metadata = parse_bridge_ready(ready, 57_400, true).unwrap();
+        let metadata = parse_bridge_ready(ready, VARIABLE_COUNT as usize, 57_400, true).unwrap();
         assert_eq!(metadata.cadical, "cadical-2.1.3-f13d744");
         assert_eq!(
             metadata.revision,
             "f13d74439a5b5c963ac5b02d05ce93a8098018b8"
         );
         assert!(metadata.prefer_selected);
-        assert!(parse_bridge_ready(ready, 57_401, true).is_err());
-        assert!(parse_bridge_ready(ready, 57_400, false).is_err());
+        assert!(parse_bridge_ready(ready, VARIABLE_COUNT as usize, 57_401, true).is_err());
+        assert!(parse_bridge_ready(ready, VARIABLE_COUNT as usize, 57_400, false).is_err());
 
         let assignment = assignment_for_row_thermo(&directed_edges());
         assert_eq!(
-            parse_bridge_model(&format_bridge_model(&assignment)).unwrap(),
+            parse_bridge_model(&format_bridge_model(&assignment), VARIABLE_COUNT as usize).unwrap(),
             assignment
         );
-        assert!(parse_bridge_model("MODEL 1 -2 0").is_err());
+        assert!(parse_bridge_model("MODEL 1 -2 0", VARIABLE_COUNT as usize).is_err());
         let mut wrong_order = format_bridge_model(&assignment);
         wrong_order = wrong_order.replacen("MODEL 1 ", "MODEL 2 ", 1);
-        assert!(parse_bridge_model(&wrong_order).is_err());
+        assert!(parse_bridge_model(&wrong_order, VARIABLE_COUNT as usize).is_err());
     }
 
     #[test]
@@ -5059,6 +6115,7 @@ mod tests {
             &after,
             &pair,
             SymmetryBreak::None,
+            TopologyScope::AtMost19,
         )
         .unwrap();
         write_cnf(&after, &fresh, SymmetryBreak::None).unwrap();
@@ -5110,9 +6167,45 @@ mod tests {
             &after,
             &after.cuts,
             SymmetryBreak::None,
+            TopologyScope::AtMost19,
         )
         .unwrap();
         write_cnf(&after, &fresh, SymmetryBreak::None).unwrap();
+        assert_eq!(fs::read(&appended).unwrap(), fs::read(&fresh).unwrap());
+        fs::remove_file(appended).unwrap();
+        fs::remove_file(fresh).unwrap();
+    }
+
+    #[test]
+    fn exact_982_incremental_append_matches_a_fresh_cnf_byte_for_byte() {
+        let first = parse_grid(CANONICAL).unwrap();
+        let pair = GridPair::new(first, swap_symbols(first, 1, 2)).unwrap();
+        let before = empty_checkpoint();
+        let mut after = empty_checkpoint();
+        after.pairs.push(pair);
+        after.cuts.push(pair_cut(&pair, &directed_edges()));
+        after.checksum = pairs_checksum(&after.pairs);
+        let appended = temporary_path("exact-982-appended.cnf");
+        let fresh = temporary_path("exact-982-fresh.cnf");
+        write_cnf_for_scope(
+            &before,
+            &appended,
+            SymmetryBreak::None,
+            TopologyScope::Exact982,
+        )
+        .unwrap();
+        append_refinement_to_cnf(
+            &appended,
+            0,
+            0,
+            before.checksum,
+            &after,
+            &after.cuts,
+            SymmetryBreak::None,
+            TopologyScope::Exact982,
+        )
+        .unwrap();
+        write_cnf_for_scope(&after, &fresh, SymmetryBreak::None, TopologyScope::Exact982).unwrap();
         assert_eq!(fs::read(&appended).unwrap(), fs::read(&fresh).unwrap());
         fs::remove_file(appended).unwrap();
         fs::remove_file(fresh).unwrap();
@@ -5146,6 +6239,7 @@ mod tests {
             &after,
             &after.cuts,
             SymmetryBreak::D4ComplementV1,
+            TopologyScope::AtMost19,
         )
         .unwrap();
         write_cnf(&after, &fresh, SymmetryBreak::D4ComplementV1).unwrap();
@@ -5270,6 +6364,42 @@ mod tests {
         let distinct_cut = pair_cut(&pair_two, &directed_edges());
         assert_ne!(cut, distinct_cut);
         assert!(witnesses.insert_cut(distinct_cut, 0).is_err());
+    }
+
+    #[test]
+    fn checkpoint_merge_preserves_base_prefix_and_first_witnesses() {
+        let first = parse_grid(CANONICAL).unwrap();
+        let pair_one = GridPair::new(first, swap_symbols(first, 1, 2)).unwrap();
+        let pair_two = GridPair::new(first, swap_symbols(first, 3, 4)).unwrap();
+        let pair_three = GridPair::new(first, swap_symbols(first, 5, 6)).unwrap();
+        let mut destination = checkpoint_from_pairs(vec![pair_one]);
+        let source = checkpoint_from_pairs(vec![pair_one, pair_two, pair_three]);
+        let prefix_pairs = destination.pairs.clone();
+        let prefix_cuts = destination.cuts.clone();
+        let prefix_witnesses = destination.cut_witnesses.clone();
+        let stats = merge_checkpoint_data(&mut destination, &source, &directed_edges()).unwrap();
+
+        assert_eq!(stats.input_pairs, 3);
+        assert_eq!(stats.added_pairs, 2);
+        assert_eq!(stats.duplicate_pairs, 1);
+        assert_eq!(&destination.pairs[..prefix_pairs.len()], &prefix_pairs);
+        assert_eq!(&destination.cuts[..prefix_cuts.len()], &prefix_cuts);
+        assert_eq!(
+            &destination.cut_witnesses[..prefix_witnesses.len()],
+            &prefix_witnesses
+        );
+        assert_eq!(destination.pairs, vec![pair_one, pair_two, pair_three]);
+        assert_eq!(destination.checksum, pairs_checksum(&destination.pairs));
+        assert!(
+            destination
+                .cut_witnesses
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        );
+
+        let mut wrong_budget = source;
+        wrong_budget.budget = 15;
+        assert!(merge_checkpoint_data(&mut destination, &wrong_budget, &directed_edges()).is_err());
     }
 
     #[test]
@@ -5422,6 +6552,7 @@ mod tests {
             None,
             &cnf,
             SymmetryBreak::None,
+            TopologyScope::AtMost19,
             "bridge failed".into(),
         );
         assert!(message.contains("state was saved"));

@@ -327,6 +327,49 @@ pub struct NineEightScreenResult {
     pub screen: TwoCellScreenResult,
 }
 
+/// A configurable-cap solution count for one legal directed two-cell
+/// thermometer disjoint from a length-9 plus length-8 base.
+///
+/// When `exact` is true, `count` is the complete number of solutions. When it
+/// is false, `count` equals the requested cap and is only a lower bound. The
+/// first two solutions, when present, index the enclosing result's compact
+/// witness pool.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TwoCellExtensionScore {
+    pub bulb: u8,
+    pub tip: u8,
+    pub count: u64,
+    pub exact: bool,
+    pub first_witness: Option<u32>,
+    pub second_witness: Option<u32>,
+}
+
+impl TwoCellExtensionScore {
+    pub fn capped(&self) -> bool {
+        !self.exact
+    }
+}
+
+/// Collective configurable-cap scores for every legal two-cell extension of
+/// a disjoint length-9 plus length-8 base.
+///
+/// Extensions are always ordered deterministically by `(bulb, tip)`. A short
+/// collective enumeration scores all extensions at once; any edge still below
+/// `cap` is then counted independently to make every returned score either
+/// exact or capped.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NineEightScoreResult {
+    pub compatible_templates: u8,
+    pub cap: u64,
+    pub base_solutions_visited: u64,
+    pub base_exhausted: bool,
+    pub collective_solution_limit: u64,
+    pub fallback_searches: u32,
+    pub extensions: Vec<TwoCellExtensionScore>,
+    pub witness_solutions: Vec<[u8; 81]>,
+    pub stats: SolveStats,
+}
+
 impl TwoCellScreenResult {
     pub fn zero_count(&self) -> usize {
         self.extensions
@@ -467,6 +510,15 @@ struct ExtensionAccumulator {
     budget_reached: bool,
 }
 
+struct ExtensionScoreAccumulator {
+    extensions: Vec<TwoCellExtensionScore>,
+    pending: Vec<usize>,
+    witness_solutions: Vec<[u8; 81]>,
+    base_solutions_visited: u64,
+    cap: u64,
+    solution_limit: u64,
+}
+
 impl ExtensionAccumulator {
     fn new(layout: &Layout, solution_limit: Option<u64>) -> Self {
         let mut extensions = Vec::new();
@@ -536,6 +588,80 @@ impl ExtensionAccumulator {
             .is_some_and(|limit| self.base_solutions_visited >= limit)
         {
             self.budget_reached = true;
+            return false;
+        }
+        true
+    }
+}
+
+impl ExtensionScoreAccumulator {
+    fn new(layout: &Layout, cap: u64, solution_limit: u64) -> Self {
+        let mut extensions = Vec::new();
+        for bulb in 0u8..81 {
+            if layout.thermo_of[bulb as usize] != NO_CELL {
+                continue;
+            }
+            for tip in 0u8..81 {
+                if layout.thermo_of[tip as usize] == NO_CELL && king_adjacent(bulb, tip) {
+                    extensions.push(TwoCellExtensionScore {
+                        bulb,
+                        tip,
+                        count: 0,
+                        exact: false,
+                        first_witness: None,
+                        second_witness: None,
+                    });
+                }
+            }
+        }
+        Self {
+            pending: (0..extensions.len()).collect(),
+            extensions,
+            witness_solutions: Vec::new(),
+            base_solutions_visited: 0,
+            cap,
+            solution_limit,
+        }
+    }
+
+    /// Returns true while at least one edge still needs another solution and
+    /// the collective prefix budget has not been consumed.
+    fn observe(&mut self, state: &[u16; 81]) -> bool {
+        self.base_solutions_visited += 1;
+        let mut witness = None;
+        let mut write = 0usize;
+        for read in 0..self.pending.len() {
+            let index = self.pending[read];
+            let satisfies = {
+                let extension = &self.extensions[index];
+                state[extension.bulb as usize] < state[extension.tip as usize]
+            };
+            if satisfies {
+                let extension = &mut self.extensions[index];
+                if extension.count < 2 {
+                    let witness = *witness.get_or_insert_with(|| {
+                        let witness = self.witness_solutions.len() as u32;
+                        self.witness_solutions.push(masks_to_solution(state));
+                        witness
+                    });
+                    if extension.count == 0 {
+                        extension.first_witness = Some(witness);
+                    } else {
+                        extension.second_witness = Some(witness);
+                    }
+                }
+                extension.count += 1;
+            }
+            if self.extensions[index].count < self.cap {
+                self.pending[write] = index;
+                write += 1;
+            }
+        }
+        self.pending.truncate(write);
+        if self.pending.is_empty() {
+            return false;
+        }
+        if self.base_solutions_visited >= self.solution_limit {
             return false;
         }
         true
@@ -930,6 +1056,49 @@ impl Solver {
         true
     }
 
+    /// Returns true when the complete subtree was exhausted, or false when
+    /// every score reached its cap or the collective prefix budget was used.
+    fn search_extension_scores(
+        &self,
+        mut state: [u16; 81],
+        mut work: Work,
+        depth: u8,
+        accumulator: &mut ExtensionScoreAccumulator,
+        stats: &mut SolveStats,
+        cell_order: &mut [u8; 81],
+    ) -> bool {
+        stats.nodes += 1;
+        stats.max_depth = stats.max_depth.max(depth);
+        if !self.propagate(&mut state, &mut work, stats) {
+            return true;
+        }
+        let Some(cell) = choose_branch_cell(&state, &self.layout, cell_order) else {
+            return accumulator.observe(&state);
+        };
+
+        stats.branches += 1;
+        let mut choices = state[cell];
+        while choices != 0 {
+            let value = low_bit(choices);
+            choices &= choices - 1;
+            let mut child = state;
+            let mut child_work = Work::default();
+            if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value)
+                && !self.search_extension_scores(
+                    child,
+                    child_work,
+                    depth + 1,
+                    accumulator,
+                    stats,
+                    cell_order,
+                )
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     fn propagate(&self, state: &mut [u16; 81], work: &mut Work, stats: &mut SolveStats) -> bool {
         loop {
             if let Some(cell) = work.pop_single() {
@@ -1075,6 +1244,109 @@ pub fn screen_nine_eight_extensions(
     })
 }
 
+/// Count the solutions of every legal directed two-cell extension of a
+/// disjoint length-9 plus length-8 base, up to a caller-selected cap.
+///
+/// The collective prefix visits base solutions once and updates every legal
+/// extension they satisfy. Extensions that remain below `cap` after that
+/// prefix are counted independently across the compatible omitted-digit
+/// templates. Thus every returned count is directly comparable at the same
+/// cap: `exact == true` means the complete count, while `exact == false` means
+/// exactly `cap` solutions were found and more may exist.
+///
+/// A `collective_solution_limit` of zero skips the collective prefix. `cap`
+/// must be at least two so the result can also retain two distinct witnesses
+/// for every non-unique extension.
+pub fn score_nine_eight_extensions(
+    path_nine: &[u8],
+    path_eight: &[u8],
+    cap: u64,
+    collective_solution_limit: u64,
+) -> Result<NineEightScoreResult, LayoutError> {
+    assert!(cap >= 2, "extension score cap must be at least two");
+    let base_layout = Layout::from_paths([path_nine, path_eight].into_iter())?;
+    if path_nine.len() != 9 {
+        return Err(LayoutError::InvalidLength {
+            thermo: 0,
+            length: path_nine.len(),
+        });
+    }
+    if path_eight.len() != 8 {
+        return Err(LayoutError::InvalidLength {
+            thermo: 1,
+            length: path_eight.len(),
+        });
+    }
+
+    let solvers = nine_eight_template_solvers(path_nine, path_eight);
+    let compatible_templates = solvers.len() as u8;
+    let mut accumulator =
+        ExtensionScoreAccumulator::new(&base_layout, cap, collective_solution_limit);
+    let mut stats = SolveStats::default();
+    let mut base_exhausted = solvers.is_empty();
+
+    if !solvers.is_empty() && collective_solution_limit == 0 {
+        base_exhausted = false;
+    } else if !solvers.is_empty() {
+        base_exhausted = true;
+        for solver in &solvers {
+            if accumulator.pending.is_empty() {
+                base_exhausted = false;
+                break;
+            }
+            let exhausted = if let Some((state, work)) = solver.initial_search_state() {
+                let mut cell_order = std::array::from_fn(|cell| cell as u8);
+                solver.search_extension_scores(
+                    state,
+                    work,
+                    0,
+                    &mut accumulator,
+                    &mut stats,
+                    &mut cell_order,
+                )
+            } else {
+                true
+            };
+            if !exhausted {
+                base_exhausted = false;
+                break;
+            }
+        }
+    }
+
+    let fallback_searches = if !base_exhausted && !accumulator.pending.is_empty() {
+        finish_extension_scores_for_solvers(&solvers, &mut accumulator, &mut stats)
+    } else {
+        for extension in &mut accumulator.extensions {
+            // Once an extension reaches the cap it leaves `pending`, so later
+            // base solutions are deliberately no longer counted for it. Even
+            // if the remaining collective search exhausts the base, a count
+            // equal to the cap is therefore still only a capped lower bound.
+            extension.exact = base_exhausted && extension.count < cap;
+        }
+        0
+    };
+    debug_assert!(base_exhausted || accumulator.pending.is_empty());
+    debug_assert!(
+        accumulator
+            .extensions
+            .iter()
+            .all(|extension| extension.exact || extension.count == cap)
+    );
+
+    Ok(NineEightScoreResult {
+        compatible_templates,
+        cap,
+        base_solutions_visited: accumulator.base_solutions_visited,
+        base_exhausted,
+        collective_solution_limit,
+        fallback_searches,
+        extensions: accumulator.extensions,
+        witness_solutions: accumulator.witness_solutions,
+        stats,
+    })
+}
+
 fn nine_eight_template_solvers(path_nine: &[u8], path_eight: &[u8]) -> Vec<Solver> {
     let mut solvers = Vec::with_capacity(9);
     for omitted in 1u8..=9 {
@@ -1195,6 +1467,81 @@ fn finish_extensions_for_solvers(
         let extension = &mut accumulator.extensions[index];
         extension.count = witness_count as u8;
         extension.exact = witness_count < 2;
+        extension.first_witness = witnesses[0];
+        extension.second_witness = witnesses[1];
+    }
+    searches
+}
+
+fn finish_extension_scores_for_solvers(
+    solvers: &[Solver],
+    accumulator: &mut ExtensionScoreAccumulator,
+    stats: &mut SolveStats,
+) -> u32 {
+    let pending = std::mem::take(&mut accumulator.pending);
+    let mut witness_map: HashMap<[u8; 81], u32> = accumulator
+        .witness_solutions
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, solution)| (solution, index as u32))
+        .collect();
+    let mut searches = 0u32;
+
+    for &index in &pending {
+        let (bulb, tip) = {
+            let extension = &accumulator.extensions[index];
+            (extension.bulb, extension.tip)
+        };
+        let mut count = 0u64;
+        let mut exact = true;
+        let mut witnesses = [None, None];
+        let mut witness_count = 0usize;
+
+        for base_solver in solvers {
+            let remaining = accumulator.cap - count;
+            searches += 1;
+            let solver = Solver {
+                givens: base_solver.givens,
+                layout: base_solver.layout.with_two_cell_extension(bulb, tip),
+            };
+            // `count_up_to_internal` reserves limits below two for its public
+            // 0/1/2+ contract. If only one score slot remains, finding up to
+            // two solutions is harmless and lets us stop with a sound cap.
+            let result = solver.count_up_to_internal(remaining.max(2), true);
+            merge_stats(stats, &result.stats);
+            let take = result.count.min(remaining);
+
+            for solution in [result.first_solution, result.second_solution]
+                .into_iter()
+                .flatten()
+                .take(take.min(2) as usize)
+            {
+                if witness_count == 2 {
+                    break;
+                }
+                let witness = intern_witness(
+                    &mut accumulator.witness_solutions,
+                    &mut witness_map,
+                    solution,
+                );
+                if !witnesses[..witness_count].contains(&Some(witness)) {
+                    witnesses[witness_count] = Some(witness);
+                    witness_count += 1;
+                }
+            }
+
+            count += take;
+            if count == accumulator.cap {
+                exact = false;
+                break;
+            }
+            debug_assert!(!result.capped);
+        }
+
+        let extension = &mut accumulator.extensions[index];
+        extension.count = count;
+        extension.exact = exact;
         extension.first_witness = witnesses[0];
         extension.second_witness = witnesses[1];
     }
@@ -1794,6 +2141,11 @@ mod tests {
         &[77, 69, 78, 70, 62, 53, 44, 52],
         &[41, 51],
     ];
+    const UNIQUE_NINETEEN: &[&[u8]] = &[
+        &[2, 3, 12, 11, 19, 27, 36, 28, 37],
+        &[52, 61, 62, 70, 78, 77, 76, 68],
+        &[16, 24],
+    ];
 
     fn paths(raw: &[&[u8]]) -> Vec<Vec<u8>> {
         raw.iter().map(|path| path.to_vec()).collect()
@@ -2016,6 +2368,20 @@ mod tests {
     }
 
     #[test]
+    fn guided_nineteen_is_unique() {
+        let layout = paths(UNIQUE_NINETEEN);
+        let result = Solver::blank(&layout).unwrap().classify();
+        assert_eq!(result.multiplicity(), Multiplicity::Unique);
+        assert_eq!(result.count, 1);
+        let expected =
+            (*b"831274569964358271257961843682743195793125486415896327578612934126439758349587612")
+                .map(|digit| digit - b'0');
+        assert_eq!(result.first_solution, Some(expected));
+        assert!(result.second_solution.is_none());
+        assert_solution_satisfies(result.first_solution.as_ref().unwrap(), &layout);
+    }
+
+    #[test]
     fn known_nineteen_has_three_solutions() {
         let solver = Solver::blank(&paths(KNOWN_THREE)).unwrap();
         let classified = solver.classify();
@@ -2161,6 +2527,97 @@ mod tests {
                 (expected.bulb, expected.tip, expected.count, expected.exact)
             );
         }
+    }
+
+    #[test]
+    fn nine_eight_scores_at_cap_two_match_the_existing_screen() {
+        let base = paths(&KNOWN_THREE[..2]);
+        for prefix in [0, 1, 16, 128] {
+            let screen = screen_nine_eight_extensions(&base[0], &base[1], prefix).unwrap();
+            let scores = score_nine_eight_extensions(&base[0], &base[1], 2, prefix).unwrap();
+
+            assert_eq!(scores.compatible_templates, screen.compatible_templates);
+            assert_eq!(
+                scores.base_solutions_visited,
+                screen.screen.base_solutions_visited
+            );
+            assert_eq!(scores.base_exhausted, screen.screen.base_exhausted);
+            assert_eq!(scores.fallback_searches, screen.screen.fallback_searches);
+            assert_eq!(scores.extensions.len(), screen.screen.extensions.len());
+            for (score, classified) in scores.extensions.iter().zip(&screen.screen.extensions) {
+                assert_eq!((score.bulb, score.tip), (classified.bulb, classified.tip));
+                assert_eq!(score.count, classified.count as u64);
+                assert_eq!(score.exact, classified.exact);
+            }
+        }
+    }
+
+    #[test]
+    fn nine_eight_configurable_scores_match_generic_solver_for_every_extension() {
+        let base = paths(&KNOWN_THREE[..2]);
+        let cap = 4;
+        let scores = score_nine_eight_extensions(&base[0], &base[1], cap, 8).unwrap();
+
+        for score in &scores.extensions {
+            assert!(score.exact || score.count == cap);
+            assert_eq!(score.capped(), !score.exact);
+
+            let mut extended = base.clone();
+            extended.push(vec![score.bulb, score.tip]);
+            let generic = Solver::blank(&extended).unwrap().count_up_to(cap);
+            assert_eq!(score.count, generic.count, "edge {score:?}");
+            assert_eq!(score.exact, !generic.capped, "edge {score:?}");
+
+            if let Some(first) = score.first_witness {
+                assert_solution_satisfies(&scores.witness_solutions[first as usize], &extended);
+            }
+            if let Some(second) = score.second_witness {
+                assert_solution_satisfies(&scores.witness_solutions[second as usize], &extended);
+                assert_ne!(score.first_witness, score.second_witness);
+            }
+            assert_eq!(score.first_witness.is_some(), score.count >= 1);
+            assert_eq!(score.second_witness.is_some(), score.count >= 2);
+        }
+    }
+
+    #[test]
+    fn exhausted_collective_score_keeps_cap_hits_capped() {
+        let base = paths(&KNOWN_THREE[..2]);
+        let cap = 4;
+        let scores = score_nine_eight_extensions(&base[0], &base[1], cap, u64::MAX).unwrap();
+        assert!(scores.base_exhausted);
+        assert!(scores.extensions.iter().any(|score| score.count == cap));
+
+        for score in &scores.extensions {
+            let mut extended = base.clone();
+            extended.push(vec![score.bulb, score.tip]);
+            let generic = Solver::blank(&extended).unwrap().count_up_to(cap);
+            assert_eq!(score.count, generic.count, "edge {score:?}");
+            assert_eq!(score.exact, !generic.capped, "edge {score:?}");
+        }
+    }
+
+    #[test]
+    fn nine_eight_score_distinguishes_an_exact_count_from_the_same_cap() {
+        let base = paths(&KNOWN_THREE[..2]);
+        let capped = score_nine_eight_extensions(&base[0], &base[1], 3, 0).unwrap();
+        let exact = score_nine_eight_extensions(&base[0], &base[1], 4, 0).unwrap();
+        let capped_edge = capped
+            .extensions
+            .iter()
+            .find(|extension| extension.bulb == 41 && extension.tip == 51)
+            .unwrap();
+        assert_eq!(capped_edge.count, 3);
+        assert!(capped_edge.capped());
+
+        let exact_edge = exact
+            .extensions
+            .iter()
+            .find(|extension| extension.bulb == 41 && extension.tip == 51)
+            .unwrap();
+        assert_eq!(exact_edge.count, 3);
+        assert!(exact_edge.exact);
+        assert!(!exact_edge.capped());
     }
 
     #[test]
