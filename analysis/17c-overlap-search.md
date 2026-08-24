@@ -146,11 +146,23 @@ launchers cannot mix artifacts in one output directory. Each worker writes a
 uniquely named `.partial` file. The parent checks its schema, algorithm
 revision, corpus fingerprint, exact line range, cap-two accounting and terminal
 completion flags before replacing the final chunk path. Interrupted partials
-are never counted. There is intentionally no durable checkpoint inside a
-launcher chunk: stopping preserves every published chunk but recomputes the at
-most four in-flight chunks on a four-worker run. Because rare chunks can take
-hours, suspending or lowering worker priority is preferable to terminating
-them for a temporary workstation break.
+are never counted. There is intentionally no durable checkpoint inside one
+launcher task: stopping preserves every published artifact but recomputes its
+unfinished task.
+
+The launcher can permanently replace an unfinished parent chunk with a
+deterministic split manifest. Its children each contain one eligible catalogue
+record and together form an exact, gap-free and overlap-free partition of the
+parent's inclusive source-line interval. Every manifest is bound to the corpus
+hash, executable hash and algorithm revision. A logical root is satisfied by
+exactly one evidence representation: either its original parent artifact or
+all of its validated children, never both. Orphan children, inconsistent
+revisions, parent/child ambiguity, and manifests whose declared child ranges
+are incomplete or overlapping are hard errors. Missing child artifacts remain
+pending work. Published split manifests are discovered automatically on
+later resumes, and separate artifact-set and manifest-set hashes make the
+selected evidence reproducible. `--split-workers` limits the split lane so a
+pathological child cannot consume every worker while ordinary chunks remain.
 
 ```text
 python analysis/run_17c_overlap_chunks.py \
@@ -159,6 +171,24 @@ python analysis/run_17c_overlap_chunks.py \
   --output-dir <artifact-root>/overlap-exact \
   --workers 4 --eligible-per-chunk 16
 ```
+
+The audited intervention in the production run used:
+
+```text
+python analysis/run_17c_overlap_chunks.py \
+  --corpus <path-to>/17puz49158.txt \
+  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --output-dir <artifact-root>/overlap-exact \
+  --workers 4 --eligible-per-chunk 16 \
+  --split-chunk 34 --split-chunk 515 \
+  --split-chunk 598 --split-chunk 675 --split-workers 1
+```
+
+The repeated `--split-chunk` options are needed only to commit new manifests;
+normal resumes auto-adopt existing ones. This implementation subdivides at
+record boundaries. A pathological single record, and an individual
+`count_up_to(2)` call within it, remain atomic and may require a later
+candidate-level or solver-frontier split.
 
 The scanner also has an in-process checkpoint for bounded diagnostics. It
 writes a synced same-directory temporary and installs it with a validated
@@ -182,7 +212,7 @@ restate a licence for its seven post-Royle additions. Download
 | `src/comparison.rs` | 48,618 | `75D7F7D1604FC718C8647136E013E9F375A24E7A6F5757EAD59D85B287B27981` |
 | `src/lib.rs` | 92,036 | `599A8C4E14B4F856F9891AF894368E764A20CDF8E39849751C2B6F8ECDDA75C8` |
 | `src/bin/thermo-17c-overlap.rs` | 121,659 | `17769B0068DBB01F0D0EC59AD40C4B5605E250113ED4914C7626369DE7C3F066` |
-| `analysis/run_17c_overlap_chunks.py` | 28,259 | `C94DE5A7ECFC2EB80A31CFC88B38E6D2CD63F157E8983A39A7E15375300D7F89` |
+| `analysis/run_17c_overlap_chunks.py` | 45,377 | `48DC508660A36809E6F9E3250734C0E10FE28FB16A7E0DAFC5F136744ADA4A97` |
 | run's `thermo-17c-overlap.exe` | 408,576 | `117DC22FCBD0914AED6D9A8D88C9964D5A403A9FB1CCE0F64C93346D2F17B658` |
 
 The executable was built in release mode on
@@ -210,8 +240,11 @@ domains and cover branches, diamonds, cycles, dense 17-cell graphs, disjoint
 fast-path parity, and randomized exact solution-set comparisons. Scanner tests
 brute-check mask dominance, Hamiltonian orders, closure antichains, morph
 realization, resume equivalence, path-alias rejection, and checkpoint/output
-safety. Runner tests cover identity binding, artifact accounting, dry-run
-non-mutation and the exclusive output-directory lock.
+safety. Runner tests cover identity binding, artifact accounting, the exclusive
+output-directory lock, deterministic child covers, manifest
+binding, parent-versus-children exclusivity, restart behavior, safe bootstrap
+failure, stable child-failure reporting, and aggregate accounting over logical
+roots.
 
 The production identity is schema `thermo-17c-overlap-chunk-run-v1`, algorithm
 revision `saturated-axis-poset-antichain-hamiltonian-v1`, corpus FNV-1a64
@@ -257,6 +290,20 @@ more than ten hours each. A censor-aware estimate at that snapshot was roughly
 record only. They neither sample the remaining catalogue uniformly nor support
 a mathematical completion percentage.
 
+At 2026-08-24 21:35 CEST the first launcher invocation was deliberately stopped
+after 671 parent chunks had been published: 10,736 eligible records and
+30,930,497 closure-maximal candidates had been classified, with no unique case
+or error. Four in-flight parent chunks had then occupied cores for roughly 26,
+8.2, 6.8 and 4.0 hours. Across the 671 completed chunks, elapsed time correlated
+almost perfectly with solver nodes (Pearson `r = 0.9986`) but not with candidate
+count (`r = 0.0357`), locating the heavy tail inside the Sudoku comparison
+search rather than morph enumeration. The four parents were committed to exact
+one-record child partitions and the run was resumed with one split worker and
+three ordinary workers. All 671 published artifacts were retained; four
+zero-length interrupted partials were ignored. This intervention changes only
+scheduling and evidence packaging, not the candidate set or classification
+algorithm, and it is not a search result.
+
 A target-aware shortcut was implemented and measured, then rejected for the
 scanner. It stopped after the first solution differing from the 17 mapped
 catalogue clues, and every candidate on lines 1 and 803 did take that shortcut.
@@ -288,15 +335,19 @@ Before reporting a negative result, an auditor must at minimum check:
 1. the corpus SHA-256, record count and syntax;
 2. `run-identity.json` against the executable hash, algorithm revision, chunk
    size, eligible count and total chunk count above;
-3. that the 1,586 chunk filenames form the runner's exact contiguous partition
-   of source lines 1 through 49,158, with no gaps or overlaps;
-4. every chunk through the launcher's `validate_artifact` checks, including
+3. that each of the 1,586 logical parent chunks is represented by either its
+   parent artifact or one committed, complete child partition, never both, and
+   that the selected leaves cover source lines 1 through 49,158 exactly once;
+4. every selected leaf through the launcher's `validate_artifact` checks and
+   every split manifest against its bound corpus, executable, revision, parent
+   range and exact child cover, including
    header/summary fingerprint agreement, exact range exhaustion, target-true
    zero count of zero, and `classified = unique + multiple` cap-two
    accounting; and
 5. terminal `summary.json` fields `complete:true`,
    `completed_chunks:1586`, `unique_found:false`, `totals.unique:0`, and an
-   artifact-set SHA-256 recomputed from the validated chunk names and hashes.
+   artifact-set SHA-256 plus split-manifest-set SHA-256 recomputed from the
+   validated selected leaves and manifests.
 
 Running the identical launcher command after completion performs checks 2–5
 again and has no pending work. This independently validates the orchestration

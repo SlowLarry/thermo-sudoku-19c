@@ -189,9 +189,30 @@ The first full exact run began on 2026-08-23 with 1,586 chunks over 25,370
 eligible catalogue records. It exposed a much heavier runtime tail than the
 100-record timing pilot: most chunks are short, while a few can occupy a core
 for many hours. Completed chunks are independently validated before atomic
-publication and are skipped on restart. A hard stop preserves them but must
-redo any in-flight chunks, so suspension or reduced process priority is safer
-during temporary workstation use.
+publication and are skipped on restart. An unfinished parent chunk may now be
+committed to a deterministic split manifest whose one-eligible-record children
+exactly partition its original source-line interval. The aggregate accepts
+either the parent artifact or the complete child partition, never both, and
+binds the manifest to the corpus, executable and algorithm revision. A separate
+`--split-workers` limit keeps pathological children from occupying every core.
+
+For example, this resumes the production identity while subdividing four
+observed stragglers and assigning only one worker to their children:
+
+```text
+python analysis/run_17c_overlap_chunks.py \
+  --corpus <path-to>/17puz49158.txt \
+  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --output-dir <artifact-root>/overlap-exact \
+  --workers 4 --eligible-per-chunk 16 \
+  --split-chunk 34 --split-chunk 515 \
+  --split-chunk 598 --split-chunk 675 --split-workers 1
+```
+
+After the manifests have been published, an identical resume may omit the
+`--split-chunk` flags; they are discovered and validated automatically. This
+first split level isolates records, not individual solver candidates, so a
+single pathological record is still atomic.
 
 The run directory is intentionally ignored and local. No complete generalized
 17-cell conclusion is claimed until its `summary.json` says `complete:true`,

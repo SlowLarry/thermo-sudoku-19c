@@ -123,9 +123,15 @@ this saturated network, so a unique smaller network would imply that the
 saturated one is unique too. The new arbitrary-comparison solver and exact
 morph/poset scanner are implemented. The full four-worker catalogue run began
 on 2026-08-23; early timing pilots seriously underestimated a sparse
-record-level heavy tail, and the observed run is a multi-day computation. No
-complete generalized result is claimed until every chunk and the aggregate
-have passed the recorded consistency checks. See
+record-level heavy tail, and the observed run is a multi-day computation. The
+launcher can now replace an unfinished parent chunk (normally 16 eligible
+records) with an exact manifest of one-eligible-record children. This preserves
+all published work,
+isolates pathological records, and reserves the other worker lanes for normal
+progress; parent and child evidence are mutually exclusive and must cover the
+same source interval exactly. No complete generalized result is claimed until
+every logical chunk and the aggregate have passed the recorded consistency
+checks. See
 [`analysis/17c-overlap-search.md`](analysis/17c-overlap-search.md).
 
 The reduction, corpus hashes, exact algorithm, deterministic result, and scope
