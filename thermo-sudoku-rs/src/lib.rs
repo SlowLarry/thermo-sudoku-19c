@@ -1,6 +1,13 @@
 use std::collections::HashMap;
 use std::fmt;
 
+mod comparison;
+
+pub use comparison::{
+    ComparisonLayout, ComparisonLayoutError, ComparisonProblemError, ComparisonSolver,
+    MAX_COMPARISONS, TargetAlternativeResult, TargetProjectionError,
+};
+
 const ALL: u16 = 0x01ff;
 const NO_CELL: u8 = u8::MAX;
 const DEFAULT_EXTENSION_PREFIX_SOLUTIONS: u64 = 128;

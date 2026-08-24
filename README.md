@@ -1,4 +1,4 @@
-# 19-cell thermo Sudoku research
+# Minimum-coverage thermo Sudoku research
 
 This workspace now contains two maintained components; the synchronized files
 under `sources/` remain read-only.
@@ -7,15 +7,37 @@ under `sources/` remain read-only.
 partition and independently verified by several exact solvers. Its paths,
 solution, and discovery provenance are in
 [`analysis/unique-19c-9x8x2-2026-08-21.md`](analysis/unique-19c-9x8x2-2026-08-21.md).
+The search has now moved to 17-cell coverage, the absolute lower bound implied
+by the no-16-clue theorem. Exact catalogue scans now exclude `9+8` and all ten
+three-thermometer partitions, closing the complete 15- and 14-comparison
+strata. A later exact scan exhausted the merge-maximal representatives of the
+sole eight-thermometer partition. Therefore the global disjoint existence
+search need continue through only the 39 four- through seven-thermometer
+partitions; this does not separately exclude non-maximal eight-path layouts,
+which would have a unique lower-path dominator. No unique 17-cell construction
+is currently known, while a new saturated-network scan attacks all disjoint,
+overlapping, and branching cases together.
+That exact generalized scan is currently running over 1,586 restart-safe
+chunks; its partial progress is not a result and is kept under ignored
+`runs/` paths rather than committed to the repository.
 
 - `thermo_search/thermo_anneal.py`: corrected, bounded and reproducible
   simulated-annealing search. It can use the installed console solver for
   cross-checks or the in-process Rust backend for normal work.
 - `thermo-sudoku-rs/`: dependency-free Rust solver for classic Sudoku plus
-  strict, cell-disjoint thermometers. It returns capped solution counts and is
-  designed first for `0 / 1 / 2+` classification.
+  strict thermometers. Its original fast path handles cell-disjoint paths; a
+  second exact comparison engine handles shared cells, overlaps, and branches.
+  Both are designed first for `0 / 1 / 2+` classification.
+- `thermo-17c-morph`: exact morph/path scanner over the complete catalogue of
+  49,158 essentially different 17-clue classics.
+- `thermo-17c-three-path`: exact scanner for all ten three-thermometer
+  partitions of 17 cells.
+- `thermo-17c-maximal`: component-unlabelled merge-maximal scanner for the
+  remaining disjoint path layers.
+- `thermo-17c-overlap`: saturated-network scanner for arbitrary overlapping
+  and branching local inequalities on the 17 catalogue cells.
 
-The fixed geometry is:
+The original path-based searches use this geometry:
 
 - zero-based row-major cells;
 - bulb-to-tip path order;
@@ -24,10 +46,17 @@ The fixed geometry is:
 - no cell shared by different thermometers;
 - diagonal segments may geometrically cross if they do not share a cell.
 
+The generalized 17-cell scanner deliberately replaces the no-sharing rule by
+a finite directed network of local strict comparisons. Cells may be shared,
+comparisons may branch or merge, and every edge can equivalently be drawn as a
+two-cell thermometer. Its exact scope and why one saturated network suffices
+are documented separately below.
+
 Quick verification:
 
 ```text
 cargo test --release --manifest-path thermo-sudoku-rs/Cargo.toml
+python -m unittest analysis.test_run_17c_overlap_chunks -v
 python -m unittest discover -s thermo_search -p "test_*.py" -v
 python thermo_search/thermo_anneal.py validate-corpus \
   --input sources/min_thermos_9_8_2.txt
@@ -47,6 +76,61 @@ only the unresolved extensions independently.
 The supplied corpus currently gives 1,279 exact count matches and one geometry
 rejection: line 1192 shares cell 60 between two thermometers. No source record
 is modified.
+
+## Exact 17-cell classic-morph search
+
+Any unique thermo puzzle covering 17 cells induces a unique ordinary Sudoku
+when those same 17 cells are fixed to their values in the solution. Therefore
+the complete 49,158-classic catalogue is a complete starting universe, up to
+Sudoku morphs and digit relabelling. The same reduction plus the no-16-clue
+theorem proves that no thermo-only construction can cover fewer than 17 cells.
+
+The first exact stage is `9+8`, the only two-path partition and the strongest
+17-cell layout with 15 comparisons. Only 10 catalogue records have the
+necessary digit multiplicities `2,2,2,2,2,2,2,2,1`. The new symbolic scanner
+folds digit relabelling into the path order and represents all 1,296 row and
+1,296 column morphs with support bitsets. Its complete scan found **zero
+spatially realizable `9+8` path pairs**. Thus that stratum is closed without a
+Sudoku count.
+
+The three-path scanner then searched all ten partitions with 14 comparisons.
+It folds digit relabelling into one global source-symbol order, injects each
+symbol's occurrences into the three path roles, requires consecutive ranks to
+share a path (otherwise swapping them gives a second solution), and intersects
+the same row/column morph-support bitsets after every edge. Across the complete
+catalogue it found 337 distinct spatial survivors. Every one was classified as
+multiple, with two explicit solution grids retained. Therefore the complete
+two- and three-thermometer strata are excluded.
+
+The two-/three-path result alone left 40 disjoint partitions. A later exact
+scan classified all 151,631 merge-maximal eight-path occurrences as multiple.
+Any unique non-maximal eight-path layout could be extended to a unique
+lower-path dominator, so the global existence search now needs only the 39
+partitions with four to seven thermometers: 16 with 13 comparisons, 13 with
+12, seven with 11, and three with 10. This is a cumulative reduction, not a
+standalone exclusion of every eight-path layout. The first direct attempt at
+those lower layers was stopped after ten partial shards because of extreme
+record-level runtime variation; the completed shards were preserved, and
+exact early pruning plus dynamic small-chunk scheduling improved a matched
+pilot by 23.2%.
+
+For the broader scope in which thermometers may overlap or branch, a stronger
+exact reduction subsumes all 40 post-three-path partitions at once, including
+non-maximal eight-path layouts. For each catalogue morph and digit order,
+`thermo-17c-overlap` includes every target-true local
+comparison among the 17 cells. Any smaller overlapping network is a subset of
+this saturated network, so a unique smaller network would imply that the
+saturated one is unique too. The new arbitrary-comparison solver and exact
+morph/poset scanner are implemented. The full four-worker catalogue run began
+on 2026-08-23; early timing pilots seriously underestimated a sparse
+record-level heavy tail, and the observed run is a multi-day computation. No
+complete generalized result is claimed until every chunk and the aggregate
+have passed the recorded consistency checks. See
+[`analysis/17c-overlap-search.md`](analysis/17c-overlap-search.md).
+
+The reduction, corpus hashes, exact algorithm, deterministic result, and scope
+boundary are in
+[`analysis/17c-classic-morph-search.md`](analysis/17c-classic-morph-search.md).
 
 ## Exact 9+8+2 pilot
 

@@ -1,8 +1,10 @@
 # thermo-sudoku
 
-Dependency-free Rust reference solver for classic 9x9 Sudoku with strict,
-cell-disjoint thermometers. Orthogonal and diagonal king-neighbour steps are
-allowed; geometrically crossing diagonal segments are not treated as overlaps.
+Dependency-free Rust reference solvers for classic 9x9 Sudoku with strict
+thermometer inequalities. The original `Solver` is specialized for
+cell-disjoint paths; `ComparisonSolver` handles shared cells, overlaps, and
+branching networks. Orthogonal and diagonal king-neighbour steps are allowed,
+and geometrically crossing diagonal segments are not cell overlaps.
 
 The solver returns a capped count and is optimized for the `0 / 1 / 2+` query.
 It uses 9-bit candidate domains, a deduplicating event queue, bit-parallel
@@ -11,6 +13,20 @@ thermometer is revised by one forward lower-bound sweep and one backward
 upper-bound sweep. Because a thermometer is a simple constraint path, this
 arc-consistency pass is also generalized arc consistency for the complete
 increasing sequence.
+
+`ComparisonSolver` is not a mode switch on the disjoint-path representation.
+It stores deduplicated directed comparisons explicitly, together with one
+`u64` incident-edge mask per cell and one `u64` dirty frontier for the whole
+network. Restricting a domain schedules every edge incident to that cell; each
+dirty `A < B` edge removes unsupported values from both endpoints and may in
+turn schedule all neighbouring edges. The ordinary singleton and Sudoku-house
+queues run in the same fixpoint loop, followed by exact depth-first search.
+This is what makes shared cells and branches exact without introducing a
+general-purpose constraint framework. Inputs which are genuinely disjoint
+paths may still delegate to the original faster `Solver`. The public backend
+rejects graphs above 64 distinct comparisons; this is complete for the exact
+17-cell search because any 17 grid cells induce at most 46 undirected
+king-neighbour edges.
 
 Build and test:
 
@@ -98,6 +114,92 @@ On 2026-08-21 the reroute-enabled search found a unique disjoint 9+8+2 layout
 covering exactly 19 cells at base evaluation 15,251. Multiple independent
 solvers confirmed the sole solution. The paths, solution, run provenance, and
 verification results are in `../analysis/unique-19c-9x8x2-2026-08-21.md`.
+
+## Exact 17-cell classic-morph search
+
+`thermo-17c-morph` searches the complete set of essentially different
+17-clue classics for a thermo-only representation. A unique thermo puzzle on
+17 covered cells necessarily induces a unique classic when those cells are
+fixed, so this catalogue reduction is complete up to standard Sudoku morphs
+and digit relabelling.
+
+The initial implemented scope is exact `9+8`. Its digit multiplicity filter
+reduces the 49,158-record corpus to only ten records. The scanner folds the
+global digit relabelling into the nine-path order and carries all 1,296 row and
+1,296 column morphs as bitset domains, intersecting them after each prospective
+king step. A full scan is:
+
+```text
+thermo-17c-morph.exe \
+  --input <path-to>/17puz49158.txt \
+  --end-line 49158 \
+  --output 17c-9x8.jsonl --progress-every 0
+```
+
+The 2026-08-21 run found zero spatially realizable `9+8` covers. This closes
+the sole two-path / 15-comparison stratum. See
+`../analysis/17c-classic-morph-search.md` for the input hashes, proof reduction,
+deterministic result, and independent reference scan. Passing
+`--reference-direct` reruns a slower independent algorithm over all
+16,796,160 fixed row/column geometries; it also finds zero covers.
+
+`thermo-17c-three-path` covers the complete next layer: all ten partitions of
+17 cells into three paths, each carrying 14 comparisons. A full run is:
+
+```text
+thermo-17c-three-path.exe \
+  --input <path-to>/17puz49158.txt \
+  --partition all \
+  --output 17c-three-path.jsonl --progress-every 0
+```
+
+The complete scan found 337 distinct spatially realizable layouts. Every one
+had at least two solutions; the JSONL retains both grids as direct witnesses.
+All ten partition summaries report `complete:true` and zero unique layouts.
+`--max-eligible` is for bounded pilots only and cannot support that exhaustive
+claim. The result closes the two- and three-thermometer strata, but 40 disjoint
+partitions initially remained. The later scan classified all 151,631
+merge-maximal eight-path occurrences as multiple. A unique non-maximal
+eight-path layout would extend to a unique lower-path dominator, so the global
+disjoint existence search now needs only the 39 four- through seven-path
+partitions. This is not a standalone exclusion of every eight-path layout. The
+optimized `thermo-17c-maximal` fallback searches the remaining merge-maximal
+representatives and
+`analysis/run_17c_maximal_chunks.py` schedules restart-safe small ranges.
+
+`ComparisonSolver` is the exact generalized oracle for shared cells,
+overlapping paths, and branching comparison networks. `thermo-17c-overlap`
+uses it with a saturation theorem: for each catalogue morph and relabelling it
+tests the network containing every target-true king-neighbour comparison on
+the 17 cells. If any smaller overlapping network were unique, this stronger
+network would be unique as well; when arbitrary two-cell thermometers are
+allowed, the stronger network is itself admissible. Exact row/column-mask and
+transitive-poset dominance remove weaker realizations before solving. The
+dynamic launcher is:
+
+```text
+python analysis/run_17c_overlap_chunks.py \
+  --corpus <path-to>/17puz49158.txt \
+  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --output-dir <artifact-root>/overlap-exact \
+  --workers 4 --eligible-per-chunk 16
+```
+
+The first full exact run began on 2026-08-23 with 1,586 chunks over 25,370
+eligible catalogue records. It exposed a much heavier runtime tail than the
+100-record timing pilot: most chunks are short, while a few can occupy a core
+for many hours. Completed chunks are independently validated before atomic
+publication and are skipped on restart. A hard stop preserves them but must
+redo any in-flight chunks, so suspension or reduced process priority is safer
+during temporary workstation use.
+
+The run directory is intentionally ignored and local. No complete generalized
+17-cell conclusion is claimed until its `summary.json` says `complete:true`,
+`completed_chunks:1586`, and the aggregate has been independently audited.
+Re-running the identical command validates every published chunk before doing
+any remaining work. See
+`../analysis/17c-overlap-search.md` for the proof reduction, measurements, and
+scope boundary.
 
 The `thermo-fixed-target` binary is a separate symbolic pilot for arbitrary
 overlapping king-neighbour comparisons true in one solved target grid. It has
