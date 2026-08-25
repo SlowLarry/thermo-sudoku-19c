@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use thermo_sudoku::{ComparisonSolver, SolveResult};
+use thermo_sudoku::{SolveResult, Solver};
 
 const SIDE: usize = 9;
 const CELLS: usize = 81;
@@ -44,7 +44,8 @@ const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
 const SCHEMA: &str = "thermo-17c-overlap-v1";
 const CHECKPOINT_SCHEMA: &str = "thermo-17c-overlap-checkpoint-v3";
-const ALGORITHM_REVISION: &str = "saturated-axis-poset-antichain-hamiltonian-v1";
+const ALGORITHM_REVISION: &str =
+    "saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
@@ -650,7 +651,7 @@ fn run() -> Result<(), String> {
                     thermo_sudoku::MAX_COMPARISONS
                 ));
             }
-            let solver = ComparisonSolver::blank(&comparisons).map_err(|error| {
+            let solver = Solver::blank_comparisons(&comparisons).map_err(|error| {
                 format!("line {line_number}, unit {unit}: cannot build network: {error}")
             })?;
             let result = solver.count_up_to(options.solution_cap);

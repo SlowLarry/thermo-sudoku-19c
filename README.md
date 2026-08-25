@@ -15,19 +15,20 @@ sole eight-thermometer partition. Therefore the global disjoint existence
 search need continue through only the 39 four- through seven-thermometer
 partitions; this does not separately exclude non-maximal eight-path layouts,
 which would have a unique lower-path dominator. No unique 17-cell construction
-is currently known, while a new saturated-network scan attacks all disjoint,
-overlapping, and branching cases together.
-That exact generalized scan is currently running over 1,586 restart-safe
-chunks; its partial progress is not a result and is kept under ignored
-`runs/` paths rather than committed to the repository.
+is currently known. A saturated-network scan attacks all disjoint, overlapping,
+and branching cases together. Its first bounded production pass classified
+65,390,245 candidates as multiple and finished 25,324 of 25,370 eligible
+catalogue records; 46 deliberately deferred hard records remain outside its
+validated aggregate, so this is not yet a complete negative result. Run data
+stays under ignored `runs/` paths rather than being committed to the repository.
 
 - `thermo_search/thermo_anneal.py`: corrected, bounded and reproducible
   simulated-annealing search. It can use the installed console solver for
   cross-checks or the in-process Rust backend for normal work.
-- `thermo-sudoku-rs/`: dependency-free Rust solver for classic Sudoku plus
-  strict thermometers. Its original fast path handles cell-disjoint paths; a
-  second exact comparison engine handles shared cells, overlaps, and branches.
-  Both are designed first for `0 / 1 / 2+` classification.
+- `thermo-sudoku-rs/`: one dependency-free Rust solver for classic Sudoku plus
+  strict thermometers. The same path engine handles disjoint paths, shared
+  cells, overlaps, branches, and explicit local comparisons, and is designed
+  first for `0 / 1 / 2+` classification.
 - `thermo-17c-morph`: exact morph/path scanner over the complete catalogue of
   49,158 essentially different 17-clue classics.
 - `thermo-17c-three-path`: exact scanner for all ten three-thermometer
@@ -117,24 +118,27 @@ pilot by 23.2%.
 For the broader scope in which thermometers may overlap or branch, a stronger
 exact reduction subsumes all 40 post-three-path partitions at once, including
 non-maximal eight-path layouts. For each catalogue morph and digit order,
-`thermo-17c-overlap` includes every target-true local
-comparison among the 17 cells. Any smaller overlapping network is a subset of
-this saturated network, so a unique smaller network would imply that the
-saturated one is unique too. The new arbitrary-comparison solver and exact
-morph/poset scanner are implemented. The full four-worker catalogue run began
-on 2026-08-23; early timing pilots seriously underestimated a sparse
-record-level heavy tail, and the observed run is a multi-day computation. The
-launcher can now replace an unfinished parent chunk (normally 16 eligible
-records) with an exact manifest of one-eligible-record children. This preserves
-all published work, isolates pathological records, and reserves the other
-worker lanes for normal progress; parent and child evidence are mutually
-exclusive and must cover the same source interval exactly. The production
-policy now stops a parent after
-30 minutes and performs that split automatically; a singleton still unresolved
-after five minutes is written to a durable deferred backlog and skipped by
-normal resumes. Deferred records never count as completed, so no complete
-generalized result is claimed until every logical chunk, including that
-backlog, and the aggregate have passed the recorded consistency checks. See
+`thermo-17c-overlap` includes every target-true local comparison among the 17
+cells. Any smaller overlapping network is a subset of this saturated network,
+so a unique smaller network would imply that the saturated one is unique too.
+The first four-worker catalogue pass began on 2026-08-23; early timing pilots
+missed a sparse DFS heavy tail. The bounded scheduler ultimately completed
+25,324 of 25,370 eligible records and durably deferred 46 singleton records
+after five minutes each. All 65,390,245 completed classifications were
+multiple, but deferred work never counts as evidence, so the scan remains
+incomplete.
+
+Profiling showed that candidate generation was cheap and that the old fixed
+low-digit-first DFS could enter enormous dead subtrees in just one geometric
+morph. The Rust code now has one overlap-capable solver with dynamic
+MRV/constraint-pressure cell selection and most-constraining-first value order;
+there is no timeout or alternate solver in the exact search. This is a new
+algorithm revision and must not be mixed with the earlier run identity. The
+launcher can still split slow parent chunks into exact one-record children and
+defer operational stragglers without counting them. An exact unbounded
+diagnostic replay classified all 170,831 candidates from the 46 deferred records
+as multiple in 158.8 seconds, but a fresh complete `v2` aggregate is still
+required. See
 [`analysis/17c-overlap-search.md`](analysis/17c-overlap-search.md).
 
 The reduction, corpus hashes, exact algorithm, deterministic result, and scope

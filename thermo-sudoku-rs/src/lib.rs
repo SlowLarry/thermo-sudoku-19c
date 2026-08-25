@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::fmt;
 
-mod comparison;
-
-pub use comparison::{
-    ComparisonLayout, ComparisonLayoutError, ComparisonProblemError, ComparisonSolver,
-    MAX_COMPARISONS, TargetAlternativeResult, TargetProjectionError,
-};
-
 const ALL: u16 = 0x01ff;
 const NO_CELL: u8 = u8::MAX;
 const DEFAULT_EXTENSION_PREFIX_SOLUTIONS: u64 = 128;
+const MAX_THERMOMETERS: usize = 64;
+
+/// Maximum number of explicit directed comparisons accepted by the unified
+/// solver. Every comparison is represented internally as a two-cell
+/// thermometer, so it shares the same dirty-constraint bitset as longer
+/// paths.
+pub const MAX_COMPARISONS: usize = MAX_THERMOMETERS;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Thermometer {
@@ -27,9 +27,15 @@ impl Thermometer {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Layout {
     thermometers: Vec<Thermometer>,
-    thermo_degree: [u8; 81],
-    thermo_of: [u8; 81],
+    thermo_incident: [u64; 81],
+    comparison_neighbors: [Vec<ComparisonNeighbor>; 81],
     all_thermos: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ComparisonNeighbor {
+    other: u8,
+    cell_is_lower: bool,
 }
 
 impl Layout {
@@ -42,11 +48,38 @@ impl Layout {
         I: IntoIterator<Item = &'a [u8]>,
         I::IntoIter: ExactSizeIterator,
     {
+        Self::from_paths_with_overlap_policy(paths, true)
+    }
+
+    fn from_disjoint_paths<'a, I>(paths: I) -> Result<Self, LayoutError>
+    where
+        I: IntoIterator<Item = &'a [u8]>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        Self::from_paths_with_overlap_policy(paths, false)
+    }
+
+    fn from_paths_with_overlap_policy<'a, I>(
+        paths: I,
+        allow_overlap: bool,
+    ) -> Result<Self, LayoutError>
+    where
+        I: IntoIterator<Item = &'a [u8]>,
+        I::IntoIter: ExactSizeIterator,
+    {
         let paths = paths.into_iter();
         let thermo_count = paths.len();
+        if thermo_count > MAX_THERMOMETERS {
+            return Err(LayoutError::TooManyThermometers {
+                count: thermo_count,
+                maximum: MAX_THERMOMETERS,
+            });
+        }
         let mut occupied = [false; 81];
-        let mut thermo_degree = [0u8; 81];
-        let mut thermo_of = [NO_CELL; 81];
+        let mut thermo_incident = [0u64; 81];
+        let mut comparison_neighbors: [Vec<ComparisonNeighbor>; 81] =
+            std::array::from_fn(|_| Vec::new());
+        let mut seen_comparison = [[false; 81]; 81];
         let mut thermometers = Vec::with_capacity(thermo_count);
 
         for (thermo_index, path) in paths.enumerate() {
@@ -72,7 +105,7 @@ impl Layout {
                         cell,
                     });
                 }
-                if occupied[cell as usize] {
+                if !allow_overlap && occupied[cell as usize] {
                     return Err(LayoutError::Overlap { cell });
                 }
                 local[cell as usize] = true;
@@ -88,13 +121,25 @@ impl Layout {
                 }
             }
 
+            let thermo_bit = 1u64 << thermo_index;
             for &cell in path {
                 occupied[cell as usize] = true;
-                thermo_of[cell as usize] = thermo_index as u8;
+                thermo_incident[cell as usize] |= thermo_bit;
             }
             for edge in path.windows(2) {
-                thermo_degree[edge[0] as usize] += 1;
-                thermo_degree[edge[1] as usize] += 1;
+                let lower = edge[0] as usize;
+                let upper = edge[1] as usize;
+                if !seen_comparison[lower][upper] {
+                    seen_comparison[lower][upper] = true;
+                    comparison_neighbors[lower].push(ComparisonNeighbor {
+                        other: upper as u8,
+                        cell_is_lower: true,
+                    });
+                    comparison_neighbors[upper].push(ComparisonNeighbor {
+                        other: lower as u8,
+                        cell_is_lower: false,
+                    });
+                }
             }
             let mut cells = [NO_CELL; 9];
             cells[..path.len()].copy_from_slice(path);
@@ -106,12 +151,14 @@ impl Layout {
 
         Ok(Self {
             thermometers,
-            thermo_degree,
-            thermo_of,
-            all_thermos: if thermo_count == 0 {
-                0
-            } else {
+            thermo_incident,
+            comparison_neighbors,
+            all_thermos: if thermo_count == MAX_THERMOMETERS {
+                u64::MAX
+            } else if thermo_count != 0 {
                 (1u64 << thermo_count) - 1
+            } else {
+                0
             },
         })
     }
@@ -119,8 +166,8 @@ impl Layout {
     pub fn empty() -> Self {
         Self {
             thermometers: Vec::new(),
-            thermo_degree: [0; 81],
-            thermo_of: [NO_CELL; 81],
+            thermo_incident: [0; 81],
+            comparison_neighbors: std::array::from_fn(|_| Vec::new()),
             all_thermos: 0,
         }
     }
@@ -130,25 +177,37 @@ impl Layout {
     }
 
     pub fn covered_cells(&self) -> usize {
-        self.thermometers.iter().map(|t| t.cells().len()).sum()
+        self.thermo_incident
+            .iter()
+            .filter(|&&incident| incident != 0)
+            .count()
     }
 
     fn with_two_cell_extension(&self, bulb: u8, tip: u8) -> Self {
         debug_assert!(king_adjacent(bulb, tip));
-        debug_assert_eq!(self.thermo_of[bulb as usize], NO_CELL);
-        debug_assert_eq!(self.thermo_of[tip as usize], NO_CELL);
+        debug_assert_eq!(self.thermo_incident[bulb as usize], 0);
+        debug_assert_eq!(self.thermo_incident[tip as usize], 0);
         let mut layout = self.clone();
         let thermo_index = layout.thermometers.len();
-        debug_assert!(thermo_index < 40);
+        debug_assert!(thermo_index < MAX_THERMOMETERS);
         let mut cells = [NO_CELL; 9];
         cells[0] = bulb;
         cells[1] = tip;
         layout.thermometers.push(Thermometer { cells, length: 2 });
-        layout.thermo_degree[bulb as usize] = 1;
-        layout.thermo_degree[tip as usize] = 1;
-        layout.thermo_of[bulb as usize] = thermo_index as u8;
-        layout.thermo_of[tip as usize] = thermo_index as u8;
-        layout.all_thermos |= 1u64 << thermo_index;
+        let bulb = bulb as usize;
+        let tip = tip as usize;
+        layout.comparison_neighbors[bulb].push(ComparisonNeighbor {
+            other: tip as u8,
+            cell_is_lower: true,
+        });
+        layout.comparison_neighbors[tip].push(ComparisonNeighbor {
+            other: bulb as u8,
+            cell_is_lower: false,
+        });
+        let thermo_bit = 1u64 << thermo_index;
+        layout.thermo_incident[bulb] |= thermo_bit;
+        layout.thermo_incident[tip] |= thermo_bit;
+        layout.all_thermos |= thermo_bit;
         layout
     }
 }
@@ -176,6 +235,10 @@ pub enum LayoutError {
         from: u8,
         to: u8,
     },
+    TooManyThermometers {
+        count: usize,
+        maximum: usize,
+    },
 }
 
 impl fmt::Display for LayoutError {
@@ -202,6 +265,10 @@ impl fmt::Display for LayoutError {
             Self::NonAdjacent { thermo, from, to } => {
                 write!(f, "thermometer {thermo} has non-adjacent step {from}->{to}")
             }
+            Self::TooManyThermometers { count, maximum } => write!(
+                f,
+                "layout has {count} thermometers; maximum supported is {maximum}"
+            ),
         }
     }
 }
@@ -529,20 +596,22 @@ struct ExtensionScoreAccumulator {
 impl ExtensionAccumulator {
     fn new(layout: &Layout, solution_limit: Option<u64>) -> Self {
         let mut extensions = Vec::new();
-        for bulb in 0u8..81 {
-            if layout.thermo_of[bulb as usize] != NO_CELL {
-                continue;
-            }
-            for tip in 0u8..81 {
-                if layout.thermo_of[tip as usize] == NO_CELL && king_adjacent(bulb, tip) {
-                    extensions.push(TwoCellExtension {
-                        bulb,
-                        tip,
-                        count: 0,
-                        exact: false,
-                        first_witness: None,
-                        second_witness: None,
-                    });
+        if layout.thermometers.len() < MAX_THERMOMETERS {
+            for bulb in 0u8..81 {
+                if layout.thermo_incident[bulb as usize] != 0 {
+                    continue;
+                }
+                for tip in 0u8..81 {
+                    if layout.thermo_incident[tip as usize] == 0 && king_adjacent(bulb, tip) {
+                        extensions.push(TwoCellExtension {
+                            bulb,
+                            tip,
+                            count: 0,
+                            exact: false,
+                            first_witness: None,
+                            second_witness: None,
+                        });
+                    }
                 }
             }
         }
@@ -604,20 +673,22 @@ impl ExtensionAccumulator {
 impl ExtensionScoreAccumulator {
     fn new(layout: &Layout, cap: u64, solution_limit: u64) -> Self {
         let mut extensions = Vec::new();
-        for bulb in 0u8..81 {
-            if layout.thermo_of[bulb as usize] != NO_CELL {
-                continue;
-            }
-            for tip in 0u8..81 {
-                if layout.thermo_of[tip as usize] == NO_CELL && king_adjacent(bulb, tip) {
-                    extensions.push(TwoCellExtensionScore {
-                        bulb,
-                        tip,
-                        count: 0,
-                        exact: false,
-                        first_witness: None,
-                        second_witness: None,
-                    });
+        if layout.thermometers.len() < MAX_THERMOMETERS {
+            for bulb in 0u8..81 {
+                if layout.thermo_incident[bulb as usize] != 0 {
+                    continue;
+                }
+                for tip in 0u8..81 {
+                    if layout.thermo_incident[tip as usize] == 0 && king_adjacent(bulb, tip) {
+                        extensions.push(TwoCellExtensionScore {
+                            bulb,
+                            tip,
+                            count: 0,
+                            exact: false,
+                            first_witness: None,
+                            second_witness: None,
+                        });
+                    }
                 }
             }
         }
@@ -720,10 +791,7 @@ fn restrict_domain(
 
     state[cell] = next;
     work.dirty_houses |= CELL_HOUSE_BITS[cell];
-    let thermo = layout.thermo_of[cell];
-    if thermo != NO_CELL {
-        work.dirty_thermos |= 1u64 << thermo;
-    }
+    work.dirty_thermos |= layout.thermo_incident[cell];
     if !old.is_power_of_two() && next.is_power_of_two() {
         work.add_single(cell);
     }
@@ -741,6 +809,48 @@ impl Solver {
         Self::from_layout(givens, Layout::new(paths)?)
     }
 
+    /// Construct a solver from explicit directed king-neighbour comparisons.
+    ///
+    /// Each `(lower, upper)` pair means `digit(lower) < digit(upper)`. Exact
+    /// duplicate pairs are removed; shared endpoints, branches, merges, and
+    /// cycles are accepted and handled by the same overlapping-path engine.
+    pub fn new_comparisons(
+        givens: [u8; 81],
+        comparisons: &[(u8, u8)],
+    ) -> Result<Self, ProblemError> {
+        let mut seen = [[false; 81]; 81];
+        let mut paths = Vec::with_capacity(comparisons.len().min(MAX_COMPARISONS));
+        for (comparison, &(lower, upper)) in comparisons.iter().enumerate() {
+            if lower >= 81 {
+                return Err(ProblemError::Layout(LayoutError::CellOutOfRange {
+                    thermo: comparison,
+                    position: 0,
+                    cell: lower,
+                }));
+            }
+            if upper >= 81 {
+                return Err(ProblemError::Layout(LayoutError::CellOutOfRange {
+                    thermo: comparison,
+                    position: 1,
+                    cell: upper,
+                }));
+            }
+            if !king_adjacent(lower, upper) {
+                return Err(ProblemError::Layout(LayoutError::NonAdjacent {
+                    thermo: comparison,
+                    from: lower,
+                    to: upper,
+                }));
+            }
+            let slot = &mut seen[lower as usize][upper as usize];
+            if !*slot {
+                *slot = true;
+                paths.push(vec![lower, upper]);
+            }
+        }
+        Self::new(givens, &paths)
+    }
+
     fn from_layout(givens: [u8; 81], layout: Layout) -> Result<Self, ProblemError> {
         for (cell, &digit) in givens.iter().enumerate() {
             if digit > 9 {
@@ -752,6 +862,10 @@ impl Solver {
 
     pub fn blank(paths: &[Vec<u8>]) -> Result<Self, ProblemError> {
         Self::new([0; 81], paths)
+    }
+
+    pub fn blank_comparisons(comparisons: &[(u8, u8)]) -> Result<Self, ProblemError> {
+        Self::new_comparisons([0; 81], comparisons)
     }
 
     pub fn layout(&self) -> &Layout {
@@ -966,10 +1080,11 @@ impl Solver {
         };
 
         result.stats.branches += 1;
-        let mut choices = state[cell];
-        while choices != 0 && result.count < options.limit {
-            let value = low_bit(choices);
-            choices &= choices - 1;
+        let (values, value_count) = ordered_branch_values(&state, &self.layout, cell);
+        for &value in &values[..value_count] {
+            if result.count >= options.limit {
+                break;
+            }
             let mut child = state;
             let mut child_work = Work::default();
             if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value) {
@@ -1004,10 +1119,8 @@ impl Solver {
         };
 
         result.stats.branches += 1;
-        let mut choices = state[cell];
-        while choices != 0 {
-            let value = low_bit(choices);
-            choices &= choices - 1;
+        let (values, value_count) = ordered_branch_values(&state, &self.layout, cell);
+        for &value in &values[..value_count] {
             let mut child = state;
             let mut child_work = Work::default();
             if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value)
@@ -1041,10 +1154,8 @@ impl Solver {
         };
 
         stats.branches += 1;
-        let mut choices = state[cell];
-        while choices != 0 {
-            let value = low_bit(choices);
-            choices &= choices - 1;
+        let (values, value_count) = ordered_branch_values(&state, &self.layout, cell);
+        for &value in &values[..value_count] {
             let mut child = state;
             let mut child_work = Work::default();
             if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value)
@@ -1084,10 +1195,8 @@ impl Solver {
         };
 
         stats.branches += 1;
-        let mut choices = state[cell];
-        while choices != 0 {
-            let value = low_bit(choices);
-            choices &= choices - 1;
+        let (values, value_count) = ordered_branch_values(&state, &self.layout, cell);
+        for &value in &values[..value_count] {
             let mut child = state;
             let mut child_work = Work::default();
             if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value)
@@ -1172,7 +1281,7 @@ pub fn screen_nine_eight_extensions(
     path_eight: &[u8],
     collective_solution_limit: u64,
 ) -> Result<NineEightScreenResult, LayoutError> {
-    let base_layout = Layout::from_paths([path_nine, path_eight].into_iter())?;
+    let base_layout = Layout::from_disjoint_paths([path_nine, path_eight].into_iter())?;
     if path_nine.len() != 9 {
         return Err(LayoutError::InvalidLength {
             thermo: 0,
@@ -1271,7 +1380,7 @@ pub fn score_nine_eight_extensions(
     collective_solution_limit: u64,
 ) -> Result<NineEightScoreResult, LayoutError> {
     assert!(cap >= 2, "extension score cap must be at least two");
-    let base_layout = Layout::from_paths([path_nine, path_eight].into_iter())?;
+    let base_layout = Layout::from_disjoint_paths([path_nine, path_eight].into_iter())?;
     if path_nine.len() != 9 {
         return Err(LayoutError::InvalidLength {
             thermo: 0,
@@ -1948,24 +2057,81 @@ fn choose_branch_cell(
 
     let mut best_index = unresolved;
     let mut best_size = u32::MAX;
-    let mut best_degree = 0u8;
+    let mut best_pressure = 0u16;
     for (index, &ordered_cell) in cell_order.iter().enumerate().skip(unresolved) {
         let cell = ordered_cell as usize;
         let size = state[cell].count_ones();
-        let degree = layout.thermo_degree[cell];
-        if size < best_size || (size == best_size && degree > best_degree) {
+        if size > best_size {
+            continue;
+        }
+        let pressure = unresolved_constraint_pressure(state, layout, cell);
+        if size == best_size && pressure < best_pressure {
+            continue;
+        }
+        if size < best_size || pressure > best_pressure {
             best_index = index;
             best_size = size;
-            best_degree = degree;
-            // Two candidates on an interior thermo cell is the globally best
-            // possible MRV/degree key, so no later cell can displace it.
-            if size == 2 && degree == 2 {
-                break;
-            }
+            best_pressure = pressure;
         }
     }
     cell_order.swap(unresolved, best_index);
     Some(cell_order[unresolved] as usize)
+}
+
+/// Count constraints which can still transmit information from `cell`.
+///
+/// Static path degree proved dangerously representation-sensitive: a solved
+/// neighbour contributes nothing to the next branch, while a still-open
+/// Sudoku peer or comparison endpoint can immediately react to an assignment.
+/// This dynamic dom/degree tie-break is cheap because it is evaluated only
+/// after MRV has ruled out larger domains.
+fn unresolved_constraint_pressure(state: &[u16; 81], layout: &Layout, cell: usize) -> u16 {
+    let sudoku = PEERS[cell]
+        .iter()
+        .filter(|&&peer| !state[peer as usize].is_power_of_two())
+        .count();
+    let comparisons = layout.comparison_neighbors[cell]
+        .iter()
+        .filter(|edge| !state[edge.other as usize].is_power_of_two())
+        .count();
+    (sudoku + comparisons) as u16
+}
+
+/// Estimate the immediate candidate removals caused by assigning `value` to
+/// `cell`. Unlike a fixed low-to-high order, the score responds to the current
+/// Sudoku and inequality domains.
+fn direct_reduction(state: &[u16; 81], layout: &Layout, cell: usize, value: u16) -> u16 {
+    let mut score = PEERS[cell]
+        .iter()
+        .filter(|&&peer| state[peer as usize] & value != 0)
+        .count() as u16;
+    for edge in &layout.comparison_neighbors[cell] {
+        let other = state[edge.other as usize];
+        let removed = if edge.cell_is_lower {
+            other & value.wrapping_shl(1).wrapping_sub(1)
+        } else {
+            other & (ALL & !value.wrapping_sub(1))
+        };
+        score += removed.count_ones() as u16;
+    }
+    score
+}
+
+/// Return candidate values in most-constraining-first order. Contradictory
+/// branches are therefore exposed early, while ties remain deterministic.
+fn ordered_branch_values(state: &[u16; 81], layout: &Layout, cell: usize) -> ([u16; 9], usize) {
+    let mut scored = [(0u16, 0u16); 9];
+    let mut length = 0usize;
+    let mut choices = state[cell];
+    while choices != 0 {
+        let value = low_bit(choices);
+        choices &= choices - 1;
+        scored[length] = (direct_reduction(state, layout, cell, value), value);
+        length += 1;
+    }
+    scored[..length]
+        .sort_unstable_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    (std::array::from_fn(|index| scored[index].1), length)
 }
 
 #[cfg(test)]
@@ -2081,7 +2247,10 @@ pub unsafe extern "C" fn thermo_sudoku_count_up_to(
     limit: u64,
     first_solution: *mut u8,
 ) -> i64 {
-    if !(2..=i64::MAX as u64).contains(&limit) || offsets.is_null() || thermo_count > 40 {
+    if !(2..=i64::MAX as u64).contains(&limit)
+        || offsets.is_null()
+        || thermo_count > MAX_THERMOMETERS
+    {
         return -1;
     }
     let offsets_slice = unsafe { std::slice::from_raw_parts(offsets, thermo_count + 1) };
@@ -2156,6 +2325,19 @@ mod tests {
 
     fn paths(raw: &[&[u8]]) -> Vec<Vec<u8>> {
         raw.iter().map(|path| path.to_vec()).collect()
+    }
+
+    fn flattened(paths: &[Vec<u8>]) -> Vec<(u8, u8)> {
+        paths
+            .iter()
+            .flat_map(|path| path.windows(2).map(|edge| (edge[0], edge[1])))
+            .collect()
+    }
+
+    fn satisfies_comparisons(solution: &[u8; 81], comparisons: &[(u8, u8)]) -> bool {
+        comparisons
+            .iter()
+            .all(|&(lower, upper)| solution[lower as usize] < solution[upper as usize])
     }
 
     fn assert_solution_satisfies(solution: &[u8; 81], layout: &[Vec<u8>]) {
@@ -2347,6 +2529,34 @@ mod tests {
     fn incremental_propagation_matches_full_scan_on_arbitrary_states() {
         let layout = Layout::new(&paths(KNOWN_THREE)).unwrap();
         let mut seed = 0x94d0_49bb_1331_11ebu64;
+
+        for _ in 0..2_000 {
+            let mut initial = [0u16; 81];
+            for domain in &mut initial {
+                *domain = next_random(&mut seed);
+            }
+
+            let mut expected = initial;
+            let mut observed = initial;
+            let expected_feasible = propagate_reference(&layout, &mut expected);
+            let observed_feasible = incremental_closure(&layout, &mut observed);
+            assert_eq!(observed_feasible, expected_feasible, "initial={initial:?}");
+            if expected_feasible {
+                assert_eq!(observed, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn overlapping_incremental_propagation_matches_full_scan() {
+        let layout = Layout::new(&[
+            vec![0, 1, 10, 20],
+            vec![0, 9, 10, 19],
+            vec![10, 2],
+            vec![19, 11, 3],
+        ])
+        .unwrap();
+        let mut seed = 0x243f_6a88_85a3_08d3u64;
 
         for _ in 0..2_000 {
             let mut initial = [0u16; 81];
@@ -2681,15 +2891,169 @@ mod tests {
     }
 
     #[test]
-    fn rejects_overlap_and_bad_steps() {
+    fn accepts_overlap_but_specialized_disjoint_validation_remains_available() {
+        let paths = [vec![0, 1], vec![1, 2]];
+        let layout = Layout::new(&paths).unwrap();
+        assert_eq!(layout.covered_cells(), 3);
         assert!(matches!(
-            Layout::new(&[vec![0, 1], vec![1, 2]]),
+            Layout::from_disjoint_paths(paths.iter().map(Vec::as_slice)),
             Err(LayoutError::Overlap { cell: 1 })
         ));
         assert!(matches!(
             Layout::new(&[vec![0, 2]]),
             Err(LayoutError::NonAdjacent { .. })
         ));
+    }
+
+    #[test]
+    fn overlapping_branches_diamonds_and_cycles_use_the_unified_solver() {
+        for paths in [
+            vec![vec![0, 10, 20], vec![10, 19]],
+            vec![vec![0, 1, 10], vec![0, 9, 10]],
+        ] {
+            let comparisons = flattened(&paths);
+            let result = Solver::blank(&paths).unwrap().classify();
+            assert_eq!(result.multiplicity(), Multiplicity::Multiple);
+            assert!(satisfies_comparisons(
+                result.first_solution.as_ref().unwrap(),
+                &comparisons
+            ));
+            assert!(satisfies_comparisons(
+                result.second_solution.as_ref().unwrap(),
+                &comparisons
+            ));
+        }
+
+        assert_eq!(
+            Solver::blank_comparisons(&[(0, 1), (1, 0)])
+                .unwrap()
+                .classify()
+                .multiplicity(),
+            Multiplicity::Zero
+        );
+        assert_eq!(
+            Solver::blank_comparisons(&[(0, 1), (1, 9), (9, 0)])
+                .unwrap()
+                .classify()
+                .multiplicity(),
+            Multiplicity::Zero
+        );
+    }
+
+    #[test]
+    fn explicit_comparisons_deduplicate_and_enforce_capacity() {
+        let duplicate = Solver::blank_comparisons(&[(0, 1), (0, 1), (1, 10)]).unwrap();
+        assert_eq!(duplicate.layout().thermometers().len(), 2);
+
+        let mut comparisons = Vec::new();
+        'outer: for lower in 0u8..81 {
+            for upper in 0u8..81 {
+                if king_adjacent(lower, upper) {
+                    comparisons.push((lower, upper));
+                    if comparisons.len() == MAX_COMPARISONS + 1 {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        assert_eq!(comparisons.len(), 65);
+        let maximum = Solver::blank_comparisons(&comparisons[..MAX_COMPARISONS]).unwrap();
+        assert_eq!(maximum.layout().thermometers().len(), MAX_COMPARISONS);
+        assert_eq!(maximum.classify().multiplicity(), Multiplicity::Zero);
+        assert!(maximum.screen_two_cell_extensions().extensions.is_empty());
+        assert!(matches!(
+            Solver::blank_comparisons(&comparisons),
+            Err(ProblemError::Layout(LayoutError::TooManyThermometers {
+                count: 65,
+                maximum: 64
+            }))
+        ));
+    }
+
+    #[test]
+    fn seventeen_cells_induce_at_most_forty_six_king_edges() {
+        // A 9-bit mask describes occupied columns in one row. Horizontal
+        // edges are internal to a mask; vertical and diagonal edges depend
+        // only on consecutive row masks. The DP therefore covers every
+        // 17-cell subset of the grid without enumerating 2^81 subsets.
+        const NEGATIVE: i16 = i16::MIN / 2;
+        let row_masks = (0usize..512)
+            .map(|mask| {
+                (
+                    mask,
+                    mask.count_ones() as usize,
+                    (mask & (mask >> 1)).count_ones() as i16,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut previous = vec![[NEGATIVE; 512]; 18];
+        previous[0][0] = 0;
+        for _row in 0..9 {
+            let mut next = vec![[NEGATIVE; 512]; 18];
+            for used in 0..=17 {
+                for (previous_mask, &score) in previous[used].iter().enumerate() {
+                    if score == NEGATIVE {
+                        continue;
+                    }
+                    for &(current_mask, added, horizontal) in &row_masks {
+                        if used + added > 17 {
+                            continue;
+                        }
+                        let between = ((previous_mask & current_mask).count_ones()
+                            + (((previous_mask << 1) & 0x1ff) & current_mask).count_ones()
+                            + ((previous_mask >> 1) & current_mask).count_ones())
+                            as i16;
+                        next[used + added][current_mask] =
+                            next[used + added][current_mask].max(score + horizontal + between);
+                    }
+                }
+            }
+            previous = next;
+        }
+        assert_eq!(previous[17].iter().copied().max(), Some(46));
+    }
+
+    #[test]
+    fn unified_explicit_graph_matches_complete_solution_filtering() {
+        let base_paths = paths(KNOWN_THREE);
+        let reference = Solver::blank(&base_paths).unwrap().enumerate_up_to(4);
+        assert!(reference.exhausted);
+        assert_eq!(reference.solutions.len(), 3);
+
+        let mut all_edges = Vec::new();
+        for lower in 0u8..81 {
+            for upper in 0u8..81 {
+                if king_adjacent(lower, upper) {
+                    all_edges.push((lower, upper));
+                }
+            }
+        }
+        let base_comparisons = flattened(&base_paths);
+        let mut seed = 0xd1b5_4a32_d192_ed03u64;
+        for case in 0..32 {
+            let mut comparisons = base_comparisons.clone();
+            for _ in 0..case % 13 {
+                seed ^= seed << 7;
+                seed ^= seed >> 9;
+                seed ^= seed << 8;
+                comparisons.push(all_edges[seed as usize % all_edges.len()]);
+            }
+
+            let mut expected: Vec<_> = reference
+                .solutions
+                .iter()
+                .copied()
+                .filter(|solution| satisfies_comparisons(solution, &comparisons))
+                .collect();
+            let batch = Solver::blank_comparisons(&comparisons)
+                .unwrap()
+                .enumerate_up_to(4);
+            assert!(batch.exhausted, "case {case}");
+            let mut observed = batch.solutions;
+            expected.sort_unstable();
+            observed.sort_unstable();
+            assert_eq!(observed, expected, "case {case}");
+        }
     }
 
     #[test]
@@ -2742,5 +3106,22 @@ mod tests {
         };
         assert_eq!(count, 1);
         assert_eq!(witness, givens);
+    }
+
+    #[test]
+    fn ffi_accepts_overlapping_paths() {
+        let cells = [0u8, 1, 1, 2];
+        let offsets = [0u16, 2, 4];
+        let count = unsafe {
+            thermo_sudoku_count_up_to(
+                std::ptr::null(),
+                cells.as_ptr(),
+                offsets.as_ptr(),
+                2,
+                2,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(count, 2);
     }
 }
