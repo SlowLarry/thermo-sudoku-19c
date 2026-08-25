@@ -164,6 +164,23 @@ later resumes, and separate artifact-set and manifest-set hashes make the
 selected evidence reproducible. `--split-workers` limits the split lane so a
 pathological child cannot consume every worker while ordinary chunks remain.
 
+The bounded scheduler adds two distinct timeout outcomes. A multi-record parent
+that exceeds `--parent-timeout-seconds` is terminated individually, reaped, and
+atomically replaced by its deterministic split manifest; its singleton
+children then enter the split queue. A child exceeding
+`--singleton-timeout-seconds` is not classified. Instead, its exact parent,
+part, source range, sole eligible line, attempt count, timeout and partial-file
+metadata are written atomically to identity-bound `deferred-tasks.json`. Other
+workers continue. Normal resumes skip deferred children; only an explicit
+`--retry-deferred` pass retries them.
+
+A timeout always means unresolved, never multiple, unique, or exhausted. Only a
+fully validated terminal JSONL contributes counts. If a valid final artifact
+wins the deadline race it supersedes the timeout; a later successful retry
+similarly removes its stale deferred entry. Partials are never evidence. The
+aggregate remains `complete:false` while any deferred singleton exists and
+records the deferred-manifest hash and exact line list.
+
 ```text
 python analysis/run_17c_overlap_chunks.py \
   --corpus <path-to>/17puz49158.txt \
@@ -190,6 +207,24 @@ record boundaries. A pathological single record, and an individual
 `count_up_to(2)` call within it, remain atomic and may require a later
 candidate-level or solver-frontier split.
 
+After a second all-worker stall, the next bounded production restart command
+is:
+
+```text
+python analysis/run_17c_overlap_chunks.py \
+  --corpus <path-to>/17puz49158.txt \
+  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --output-dir <artifact-root>/overlap-exact \
+  --workers 4 --eligible-per-chunk 16 --split-workers 1 \
+  --split-chunk 676 --split-chunk 766 --split-chunk 767 \
+  --parent-timeout-seconds 1800 --singleton-timeout-seconds 300
+```
+
+The four older split manifests are adopted automatically. The three new flags
+avoid repeating already-observed multi-hour parent work. One split lane and
+three ordinary lanes preserve catalogue throughput. The main pass deliberately
+omits `--retry-deferred`; hard records are a separately auditable backlog.
+
 The scanner also has an in-process checkpoint for bounded diagnostics. It
 writes a synced same-directory temporary and installs it with a validated
 backup fallback, binding the state to the flushed JSONL byte prefix. A resume
@@ -212,7 +247,7 @@ restate a licence for its seven post-Royle additions. Download
 | `src/comparison.rs` | 48,618 | `75D7F7D1604FC718C8647136E013E9F375A24E7A6F5757EAD59D85B287B27981` |
 | `src/lib.rs` | 92,036 | `599A8C4E14B4F856F9891AF894368E764A20CDF8E39849751C2B6F8ECDDA75C8` |
 | `src/bin/thermo-17c-overlap.rs` | 121,659 | `17769B0068DBB01F0D0EC59AD40C4B5605E250113ED4914C7626369DE7C3F066` |
-| `analysis/run_17c_overlap_chunks.py` | 45,377 | `48DC508660A36809E6F9E3250734C0E10FE28FB16A7E0DAFC5F136744ADA4A97` |
+| `analysis/run_17c_overlap_chunks.py` | 66,457 | `CC65595F253BEF0185757303A8009E4ACD98EE319866C3150C70AF6173C24626` |
 | run's `thermo-17c-overlap.exe` | 408,576 | `117DC22FCBD0914AED6D9A8D88C9964D5A403A9FB1CCE0F64C93346D2F17B658` |
 
 The executable was built in release mode on
@@ -244,7 +279,10 @@ safety. Runner tests cover identity binding, artifact accounting, the exclusive
 output-directory lock, deterministic child covers, manifest
 binding, parent-versus-children exclusivity, restart behavior, safe bootstrap
 failure, stable child-failure reporting, and aggregate accounting over logical
-roots.
+roots. Timeout tests cover process-local cancellation, parent auto-split,
+durable singleton deferral and retry, exact ledger validation, deadline-final
+and unique-result races, stale-entry reconciliation, and total-start budgets.
+The full Python analysis test discovery passed 39 tests for this revision.
 
 The production identity is schema `thermo-17c-overlap-chunk-run-v1`, algorithm
 revision `saturated-axis-poset-antichain-hamiltonian-v1`, corpus FNV-1a64
@@ -304,6 +342,23 @@ zero-length interrupted partials were ignored. This intervention changes only
 scheduling and evidence packaging, not the candidate set or classification
 algorithm, and it is not a search result.
 
+The record-only intervention then exposed the flaw in retaining a permanently
+active hard lane. At the controlled 2026-08-25 07:09 CEST stop, 760 parent
+artifacts and six singleton children covered 12,166 eligible records and
+34,901,476 classified candidates, all multiple, with zero unique or zero-solution
+errors. No artifact had been published since 02:02. The four active tasks had
+run for about 9.6, 9.6, 7.4 and 5.1 hours; the split task was already the single
+eligible record on catalogue line 835. This confirmed that record subdivision
+identifies the hard case but does not by itself prevent renewed saturation.
+
+The bounded policy follows the measured tail. Only 19 of the 760 completed
+parents exceeded 30 minutes, but they consumed 52.09 of 69.47 aggregate scanner
+hours. Parents therefore receive 1,800 seconds before automatic subdivision,
+while singleton records receive 300 seconds before deferral. The latter is
+generous relative to the six completed siblings of line 835, which each took
+under four seconds. These thresholds affect scheduling only; they cannot turn
+an unresolved case into evidence.
+
 A target-aware shortcut was implemented and measured, then rejected for the
 scanner. It stopped after the first solution differing from the 17 mapped
 catalogue clues, and every candidate on lines 1 and 803 did take that shortcut.
@@ -343,13 +398,17 @@ Before reporting a negative result, an auditor must at minimum check:
    range and exact child cover, including
    header/summary fingerprint agreement, exact range exhaustion, target-true
    zero count of zero, and `classified = unique + multiple` cap-two
-   accounting; and
-5. terminal `summary.json` fields `complete:true`,
+   accounting;
+5. that `deferred-tasks.json`, if present, passes its schema and run-identity
+   validation, has an empty task list, matches the aggregate's recomputed
+   `deferred_manifest_sha256`, and that the aggregate reports zero deferred
+   singletons; and
+6. terminal `summary.json` fields `complete:true`,
    `completed_chunks:1586`, `unique_found:false`, `totals.unique:0`, and an
    artifact-set SHA-256 plus split-manifest-set SHA-256 recomputed from the
    validated selected leaves and manifests.
 
-Running the identical launcher command after completion performs checks 2–5
+Running the identical launcher command after completion performs checks 2–6
 again and has no pending work. This independently validates the orchestration
 and accounting, but it does not turn the negative into a proof certificate:
 multiplicity of the non-emitted ordinary cases and exhaustiveness of the

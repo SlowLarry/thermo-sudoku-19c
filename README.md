@@ -126,12 +126,15 @@ on 2026-08-23; early timing pilots seriously underestimated a sparse
 record-level heavy tail, and the observed run is a multi-day computation. The
 launcher can now replace an unfinished parent chunk (normally 16 eligible
 records) with an exact manifest of one-eligible-record children. This preserves
-all published work,
-isolates pathological records, and reserves the other worker lanes for normal
-progress; parent and child evidence are mutually exclusive and must cover the
-same source interval exactly. No complete generalized result is claimed until
-every logical chunk and the aggregate have passed the recorded consistency
-checks. See
+all published work, isolates pathological records, and reserves the other
+worker lanes for normal progress; parent and child evidence are mutually
+exclusive and must cover the same source interval exactly. The production
+policy now stops a parent after
+30 minutes and performs that split automatically; a singleton still unresolved
+after five minutes is written to a durable deferred backlog and skipped by
+normal resumes. Deferred records never count as completed, so no complete
+generalized result is claimed until every logical chunk, including that
+backlog, and the aggregate have passed the recorded consistency checks. See
 [`analysis/17c-overlap-search.md`](analysis/17c-overlap-search.md).
 
 The reduction, corpus hashes, exact algorithm, deterministic result, and scope

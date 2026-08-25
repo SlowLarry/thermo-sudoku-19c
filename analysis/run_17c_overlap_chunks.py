@@ -16,6 +16,7 @@ from collections import deque
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -32,6 +33,7 @@ CORPUS_FNV1A64 = 0x96BAF249978384BB
 SCANNER_SCHEMA = "thermo-17c-overlap-v1"
 RUN_SCHEMA = "thermo-17c-overlap-chunk-run-v1"
 SPLIT_SCHEMA = "thermo-17c-overlap-split-manifest-v1"
+DEFERRED_SCHEMA = "thermo-17c-overlap-deferred-tasks-v1"
 SPLIT_MANIFEST_RE = re.compile(r"^split-chunk-(\d{5})\.json$")
 SPLIT_ARTIFACT_RE = re.compile(
     r"^chunk-(\d{5})-part-(\d{4})-lines-(\d{5})-(\d{5})\.jsonl$"
@@ -79,6 +81,30 @@ COUNT_FIELDS = (
 
 class RunError(RuntimeError):
     pass
+
+
+class ChunkComplete:
+    def __init__(self, path: Path, result: dict[str, Any]) -> None:
+        self.path = path
+        self.result = result
+
+
+class ChunkTimedOut:
+    def __init__(
+        self,
+        task_label: str,
+        partial_path: Path,
+        timeout_seconds: float,
+        partial_exists: bool,
+        partial_bytes: int,
+        partial_sha256: str | None,
+    ) -> None:
+        self.task_label = task_label
+        self.partial_path = partial_path
+        self.timeout_seconds = timeout_seconds
+        self.partial_exists = partial_exists
+        self.partial_bytes = partial_bytes
+        self.partial_sha256 = partial_sha256
 
 
 class OutputDirectoryLock:
@@ -362,6 +388,175 @@ def validate_split_manifest(
     return revision
 
 
+def deferred_task_id(parent: dict[str, int], child: dict[str, int]) -> str:
+    return split_artifact_name(parent, child).removesuffix(".jsonl")
+
+
+def deferred_task_static(
+    parent: dict[str, int], child: dict[str, int], records: list[str]
+) -> dict[str, Any]:
+    eligible_lines = [
+        line
+        for line in range(child["start_line"], child["end_line"] + 1)
+        if eligible(records[line - 1])
+    ]
+    if len(eligible_lines) != 1 or child["eligible_records"] != 1:
+        raise RunError(
+            f"chunk {parent['index']} part {child['part']} is not a singleton"
+        )
+    return {
+        "id": deferred_task_id(parent, child),
+        "parent_chunk": parent["index"],
+        "part": child["part"],
+        "start_line": child["start_line"],
+        "end_line": child["end_line"],
+        "eligible_records": 1,
+        "eligible_line": eligible_lines[0],
+        "artifact": split_artifact_name(parent, child),
+    }
+
+
+def deferred_manifest_value(
+    tasks: dict[str, dict[str, Any]],
+    corpus_hash: str,
+    binary_hash: str,
+    eligible_per_chunk: int,
+    algorithm_revision: str,
+) -> dict[str, Any]:
+    return {
+        "schema": DEFERRED_SCHEMA,
+        "run_schema": RUN_SCHEMA,
+        "corpus_sha256": corpus_hash,
+        "binary_sha256": binary_hash,
+        "eligible_per_parent_chunk": eligible_per_chunk,
+        "algorithm_revision": algorithm_revision,
+        "tasks": [tasks[key] for key in sorted(tasks)],
+    }
+
+
+def validate_deferred_manifest(
+    path: Path,
+    split_children: dict[int, list[dict[str, int]]],
+    records: list[str],
+    corpus_hash: str,
+    binary_hash: str,
+    eligible_per_chunk: int,
+    algorithm_revision: str,
+) -> dict[str, dict[str, Any]]:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RunError(f"cannot read deferred-task manifest {path}: {error}") from error
+    expected_header = {
+        "schema": DEFERRED_SCHEMA,
+        "run_schema": RUN_SCHEMA,
+        "corpus_sha256": corpus_hash,
+        "binary_sha256": binary_hash,
+        "eligible_per_parent_chunk": eligible_per_chunk,
+        "algorithm_revision": algorithm_revision,
+    }
+    if not isinstance(manifest, dict) or any(
+        manifest.get(key) != value for key, value in expected_header.items()
+    ):
+        raise RunError(f"{path}: deferred-task manifest identity mismatch")
+    raw_tasks = manifest.get("tasks")
+    if not isinstance(raw_tasks, list):
+        raise RunError(f"{path}: deferred tasks must be a list")
+    allowed: dict[str, dict[str, Any]] = {}
+    allowed_partial_prefixes: dict[str, tuple[str, str]] = {}
+    for parent_index, children in split_children.items():
+        parent = {
+            "index": parent_index,
+            "start_line": children[0]["start_line"],
+            "end_line": children[-1]["end_line"],
+            "eligible_records": len(children),
+        }
+        for child in children:
+            static = deferred_task_static(parent, child, records)
+            allowed[static["id"]] = static
+            allowed_partial_prefixes[static["id"]] = (
+                f".{static['artifact']}.",
+                f".{artifact_name(parent)}.",
+            )
+    tasks: dict[str, dict[str, Any]] = {}
+    for index, task in enumerate(raw_tasks, 1):
+        if not isinstance(task, dict):
+            raise RunError(f"{path}: deferred task {index} is not an object")
+        task_id = task.get("id")
+        if not isinstance(task_id, str) or task_id in tasks or task_id not in allowed:
+            raise RunError(f"{path}: deferred task {index} is duplicate or orphaned")
+        static = allowed[task_id]
+        if any(task.get(key) != value for key, value in static.items()):
+            raise RunError(f"{path}: deferred task {task_id} metadata mismatch")
+        expected_keys = set(static) | {
+            "attempts",
+            "last_timeout_seconds",
+            "last_partial",
+            "last_partial_exists",
+            "last_partial_bytes",
+            "last_partial_sha256",
+        }
+        if set(task) != expected_keys:
+            raise RunError(f"{path}: deferred task {task_id} has unexpected fields")
+        attempts = task.get("attempts")
+        timeout_seconds = task.get("last_timeout_seconds")
+        partial = task.get("last_partial")
+        partial_exists = task.get("last_partial_exists")
+        partial_bytes = task.get("last_partial_bytes")
+        partial_hash = task.get("last_partial_sha256")
+        if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts <= 0:
+            raise RunError(f"{path}: deferred task {task_id} has invalid attempts")
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
+            raise RunError(f"{path}: deferred task {task_id} has invalid timeout")
+        valid_partial_name = False
+        if isinstance(partial, str) and Path(partial).name == partial:
+            valid_partial_name = any(
+                partial.startswith(prefix)
+                and re.fullmatch(
+                    r"[0-9a-f]{32}\.partial", partial[len(prefix) :]
+                )
+                is not None
+                for prefix in allowed_partial_prefixes[task_id]
+            )
+        if not valid_partial_name:
+            raise RunError(f"{path}: deferred task {task_id} has invalid partial path")
+        if not isinstance(partial_exists, bool):
+            raise RunError(f"{path}: deferred task {task_id} has invalid partial flag")
+        if (
+            not isinstance(partial_bytes, int)
+            or isinstance(partial_bytes, bool)
+            or partial_bytes < 0
+        ):
+            raise RunError(f"{path}: deferred task {task_id} has invalid partial size")
+        if partial_exists:
+            if (
+                not isinstance(partial_hash, str)
+                or len(partial_hash) != 64
+                or any(character not in "0123456789abcdef" for character in partial_hash)
+            ):
+                raise RunError(f"{path}: deferred task {task_id} has invalid partial hash")
+        elif partial_hash is not None or partial_bytes != 0:
+            raise RunError(f"{path}: absent deferred partial has size or hash")
+        tasks[task_id] = task
+    if [task["id"] for task in raw_tasks] != sorted(tasks):
+        raise RunError(f"{path}: deferred tasks are not in deterministic order")
+    expected = deferred_manifest_value(
+        tasks,
+        corpus_hash,
+        binary_hash,
+        eligible_per_chunk,
+        algorithm_revision,
+    )
+    if manifest != expected:
+        raise RunError(f"{path}: deferred-task manifest has unexpected fields")
+    return tasks
+
+
 def nonnegative(record: dict[str, Any], key: str, context: str) -> int:
     value = record.get(key)
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -506,10 +701,22 @@ class ActiveProcesses:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._processes: set[subprocess.Popen[str]] = set()
+        self._stopping = False
 
     def add(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
-            self._processes.add(process)
+            if not self._stopping:
+                self._processes.add(process)
+                return
+        # A future can enter run_chunk just after a unique result snapshots the
+        # registry. The terminal flag closes that registration race: a scanner
+        # created after global stop is terminated immediately and cannot make
+        # executor shutdown wait for a full task.
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
 
     def discard(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
@@ -517,10 +724,14 @@ class ActiveProcesses:
 
     def terminate_all(self) -> None:
         with self._lock:
+            self._stopping = True
             processes = tuple(self._processes)
         for process in processes:
             if process.poll() is None:
-                process.terminate()
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
 
 
 def run_chunk(
@@ -533,7 +744,8 @@ def run_chunk(
     active: ActiveProcesses,
     final_name: str | None = None,
     task_label: str | None = None,
-) -> tuple[Path, dict[str, Any]]:
+    timeout_seconds: float | None = None,
+) -> ChunkComplete | ChunkTimedOut:
     label = task_label or f"chunk {chunk.get('index', '?')}"
     final_path = output_dir / (final_name or artifact_name(chunk))
     temporary = output_dir / f".{final_path.name}.{uuid.uuid4().hex}.partial"
@@ -571,10 +783,55 @@ def run_chunk(
         creationflags=flags,
     )
     active.add(process)
+    timed_out = False
+    stdout = ""
+    stderr = ""
     try:
-        stdout, stderr = process.communicate()
+        try:
+            if timeout_seconds is None:
+                stdout, stderr = process.communicate()
+            else:
+                stdout, stderr = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
+            try:
+                stdout, stderr = process.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                if process.poll() is None:
+                    process.kill()
+                stdout, stderr = process.communicate()
     finally:
         active.discard(process)
+    stdout = stdout or ""
+    stderr = stderr or ""
+    if timed_out:
+        # A scanner can finish and flush its terminal summary exactly as the
+        # deadline fires. A fully valid artifact wins that race; anything less
+        # remains incomplete and is represented by the timeout outcome.
+        if temporary.exists():
+            try:
+                result = validate_artifact(
+                    temporary, chunk, records, algorithm_revision
+                )
+            except Exception:
+                pass
+            else:
+                os.replace(temporary, final_path)
+                return ChunkComplete(final_path, result)
+        partial_exists = temporary.exists()
+        return ChunkTimedOut(
+            task_label=label,
+            partial_path=temporary,
+            timeout_seconds=float(timeout_seconds),
+            partial_exists=partial_exists,
+            partial_bytes=temporary.stat().st_size if partial_exists else 0,
+            partial_sha256=sha256(temporary) if partial_exists else None,
+        )
     if process.returncode != 0:
         raise RunError(
             f"{label} scanner exit {process.returncode}; "
@@ -588,7 +845,7 @@ def run_chunk(
             f"{label} left invalid partial artifact {temporary}: {error}"
         ) from error
     os.replace(temporary, final_path)
-    return final_path, result
+    return ChunkComplete(final_path, result)
 
 
 def aggregate(
@@ -692,6 +949,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=1,
         help="maximum concurrent split-child scanners (default: 1)",
     )
+    parser.add_argument(
+        "--parent-timeout-seconds",
+        type=float,
+        help="wall limit for a multi-record parent before it is split",
+    )
+    parser.add_argument(
+        "--singleton-timeout-seconds",
+        type=float,
+        help="wall limit for a split singleton before durable deferral",
+    )
+    parser.add_argument(
+        "--retry-deferred",
+        action="store_true",
+        help="retry singleton tasks from the durable deferred backlog",
+    )
     parser.add_argument("--max-new-chunks", type=int)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -765,6 +1037,12 @@ def main(argv: list[str] | None = None) -> int:
             "workers, split-workers, chunk size, and max-new-chunks must be "
             "positive, with split-workers no greater than workers"
         )
+    for option, value in (
+        ("parent timeout", args.parent_timeout_seconds),
+        ("singleton timeout", args.singleton_timeout_seconds),
+    ):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise RunError(f"{option} must be finite and positive")
     corpus = args.corpus.resolve()
     binary = args.binary.resolve()
     output_dir = args.output_dir.resolve()
@@ -785,8 +1063,9 @@ def main(argv: list[str] | None = None) -> int:
     corpus_hash = hashlib.sha256(corpus_data).hexdigest()
     identity_path = output_dir / "run-identity.json"
     summary_path = output_dir / "summary.json"
+    deferred_path = output_dir / "deferred-tasks.json"
     lock_path = output_dir / ".thermo-17c-overlap-runner.lock"
-    for reserved in (identity_path, summary_path, lock_path):
+    for reserved in (identity_path, summary_path, deferred_path, lock_path):
         if reserved.exists() and (
             os.path.samefile(reserved, corpus) or os.path.samefile(reserved, binary)
         ):
@@ -806,6 +1085,12 @@ def main(argv: list[str] | None = None) -> int:
                     "split_parent_chunks": sorted(explicit_split_ids),
                     "split_workers": args.split_workers,
                 }
+            )
+        if args.parent_timeout_seconds is not None:
+            dry_identity["parent_timeout_seconds"] = args.parent_timeout_seconds
+        if args.singleton_timeout_seconds is not None:
+            dry_identity["singleton_timeout_seconds"] = (
+                args.singleton_timeout_seconds
             )
         print(json.dumps(dry_identity, sort_keys=True))
         return 0
@@ -899,6 +1184,11 @@ def main(argv: list[str] | None = None) -> int:
         raise RunError(
             "splitting requires an established run identity or a validated parent artifact"
         )
+    if (
+        args.parent_timeout_seconds is not None
+        or args.singleton_timeout_seconds is not None
+    ) and not algorithm_revision:
+        raise RunError("task timeouts require an established run identity")
 
     if algorithm_revision and not identity_path.exists():
         atomic_json(
@@ -952,6 +1242,25 @@ def main(argv: list[str] | None = None) -> int:
         if os.path.samefile(path, corpus) or os.path.samefile(path, binary):
             raise RunError(f"split artifact aliases an input file: {path}")
 
+    deferred_tasks: dict[str, dict[str, Any]] = {}
+    deferred_changed = False
+    if deferred_path.exists():
+        if os.path.samefile(deferred_path, corpus) or os.path.samefile(
+            deferred_path, binary
+        ):
+            raise RunError(f"deferred-task manifest aliases an input: {deferred_path}")
+        if not algorithm_revision:
+            raise RunError("deferred tasks require an established run identity")
+        deferred_tasks = validate_deferred_manifest(
+            deferred_path,
+            split_children,
+            records,
+            corpus_hash,
+            binary_hash,
+            args.eligible_per_chunk,
+            algorithm_revision,
+        )
+
     completed_parents: dict[int, tuple[Path, dict[str, Any]]] = {}
     completed_children: dict[tuple[int, int], tuple[Path, dict[str, Any]]] = {}
     ordinary_pending: list[dict[str, Any]] = []
@@ -967,15 +1276,24 @@ def main(argv: list[str] | None = None) -> int:
                             path, child, records, algorithm_revision
                         ),
                     )
+                    task_id = deferred_task_id(chunk, child)
+                    if task_id in deferred_tasks:
+                        deferred_tasks.pop(task_id)
+                        deferred_changed = True
                 else:
-                    split_pending.append(
-                        {
-                            "kind": "split",
-                            "parent": chunk,
-                            "chunk": child,
-                            "artifact": split_artifact_name(chunk, child),
-                        }
-                    )
+                    task_id = deferred_task_id(chunk, child)
+                    if task_id not in deferred_tasks or args.retry_deferred:
+                        split_pending.append(
+                            {
+                                "kind": "split",
+                                "parent": chunk,
+                                "chunk": child,
+                                "artifact": split_artifact_name(chunk, child),
+                                "deferred_id": (
+                                    task_id if task_id in deferred_tasks else None
+                                ),
+                            }
+                        )
             continue
         path = output_dir / artifact_name(chunk)
         if path.exists():
@@ -989,6 +1307,18 @@ def main(argv: list[str] | None = None) -> int:
                     "artifact": artifact_name(chunk),
                 }
             )
+
+    if deferred_path.exists() and deferred_changed:
+        atomic_json(
+            deferred_path,
+            deferred_manifest_value(
+                deferred_tasks,
+                corpus_hash,
+                binary_hash,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            ),
+        )
 
     child_exhausted_counts = {
         index: sum(
@@ -1040,6 +1370,19 @@ def main(argv: list[str] | None = None) -> int:
                 + len(completed_children),
             }
         )
+    if deferred_path.exists() or deferred_tasks:
+        resume_event.update(
+            {
+                "deferred_singletons": len(deferred_tasks),
+                "retry_deferred": args.retry_deferred,
+            }
+        )
+    if args.parent_timeout_seconds is not None:
+        resume_event["parent_timeout_seconds"] = args.parent_timeout_seconds
+    if args.singleton_timeout_seconds is not None:
+        resume_event["singleton_timeout_seconds"] = (
+            args.singleton_timeout_seconds
+        )
     print(json.dumps(resume_event, sort_keys=True), flush=True)
 
     started = time.monotonic()
@@ -1048,18 +1391,28 @@ def main(argv: list[str] | None = None) -> int:
     ordinary_queue = deque(ordinary_pending)
     split_queue = deque(split_pending)
     futures: dict[
-        concurrent.futures.Future[tuple[Path, dict[str, Any]]], dict[str, Any]
+        concurrent.futures.Future[ChunkComplete | ChunkTimedOut], dict[str, Any]
     ] = {}
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
     active_split_workers = 0
+    remaining_start_budget = args.max_new_chunks
 
     def submit(work: dict[str, Any]) -> None:
-        nonlocal active_split_workers
+        nonlocal active_split_workers, remaining_start_budget
+        if remaining_start_budget is not None:
+            if remaining_start_budget <= 0:
+                raise AssertionError("task start budget exhausted")
+            remaining_start_budget -= 1
         parent = work["parent"]
         chunk = work["chunk"]
         task_label = f"chunk {parent['index']}"
         if work["kind"] == "split":
             task_label += f" part {chunk['part']}"
+        timeout_seconds = (
+            args.parent_timeout_seconds
+            if work["kind"] == "parent"
+            else args.singleton_timeout_seconds
+        )
         future = executor.submit(
             run_chunk,
             binary,
@@ -1071,6 +1424,7 @@ def main(argv: list[str] | None = None) -> int:
             active,
             work["artifact"],
             task_label,
+            timeout_seconds,
         )
         futures[future] = work
         active_split_workers += int(work["kind"] == "split")
@@ -1080,10 +1434,137 @@ def main(argv: list[str] | None = None) -> int:
             split_queue
             and active_split_workers < args.split_workers
             and len(futures) < args.workers
+            and (remaining_start_budget is None or remaining_start_budget > 0)
         ):
             submit(split_queue.popleft())
-        while ordinary_queue and len(futures) < args.workers:
+        while (
+            ordinary_queue
+            and len(futures) < args.workers
+            and (remaining_start_budget is None or remaining_start_budget > 0)
+        ):
             submit(ordinary_queue.popleft())
+
+    def child_work(
+        parent: dict[str, int], child: dict[str, int]
+    ) -> dict[str, Any]:
+        task_id = deferred_task_id(parent, child)
+        return {
+            "kind": "split",
+            "parent": parent,
+            "chunk": child,
+            "artifact": split_artifact_name(parent, child),
+            "deferred_id": task_id if task_id in deferred_tasks else None,
+        }
+
+    def commit_split_parent(parent: dict[str, int]) -> list[dict[str, int]]:
+        index = parent["index"]
+        if index in split_children:
+            return split_children[index]
+        if (output_dir / artifact_name(parent)).exists():
+            raise RunError(f"cannot split completed parent chunk {index}")
+        children = make_split_children(parent, records)
+        manifest_path = output_dir / split_manifest_name(parent)
+        manifest = split_manifest_value(
+            parent,
+            children,
+            corpus_hash,
+            binary_hash,
+            args.eligible_per_chunk,
+            algorithm_revision,
+        )
+        if manifest_path.exists():
+            validate_split_manifest(
+                manifest_path,
+                parent,
+                children,
+                corpus_hash,
+                binary_hash,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            )
+        else:
+            # Publication precedes the in-memory queue update, so a crash can
+            # only cause a later resume to regenerate the exact child backlog.
+            atomic_json(manifest_path, manifest)
+        split_children[index] = children
+        child_exhausted_counts[index] = 0
+        return children
+
+    def persist_deferred_tasks() -> None:
+        atomic_json(
+            deferred_path,
+            deferred_manifest_value(
+                deferred_tasks,
+                corpus_hash,
+                binary_hash,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            ),
+        )
+
+    def defer_singleton(
+        work: dict[str, Any], timeout: ChunkTimedOut
+    ) -> dict[str, Any]:
+        parent = work["parent"]
+        child = work["chunk"]
+        static = deferred_task_static(parent, child, records)
+        previous = deferred_tasks.get(static["id"])
+        record = {
+            **static,
+            "attempts": (previous["attempts"] if previous else 0) + 1,
+            "last_timeout_seconds": timeout.timeout_seconds,
+            "last_partial": timeout.partial_path.name,
+            "last_partial_exists": timeout.partial_exists,
+            "last_partial_bytes": timeout.partial_bytes,
+            "last_partial_sha256": timeout.partial_sha256,
+        }
+        deferred_tasks[static["id"]] = record
+        # The exact singleton ledger is durable before another task is allowed
+        # into the released worker lane.
+        persist_deferred_tasks()
+        return record
+
+    def handle_timeout(
+        work: dict[str, Any], timeout: ChunkTimedOut
+    ) -> dict[str, Any]:
+        parent = work["parent"]
+        chunk = work["chunk"]
+        if work["kind"] == "parent":
+            children = commit_split_parent(parent)
+            if len(children) == 1:
+                singleton = child_work(parent, children[0])
+                record = defer_singleton(singleton, timeout)
+                return {
+                    "event": "parent-timeout-deferred-singleton",
+                    "chunk": parent["index"],
+                    "source_lines": [
+                        children[0]["start_line"],
+                        children[0]["end_line"],
+                    ],
+                    "eligible_line": record["eligible_line"],
+                    "attempts": record["attempts"],
+                    "timeout_seconds": timeout.timeout_seconds,
+                }
+            for child in children:
+                split_queue.append(child_work(parent, child))
+            return {
+                "event": "parent-timeout-auto-split",
+                "chunk": parent["index"],
+                "source_lines": [parent["start_line"], parent["end_line"]],
+                "eligible_records": parent["eligible_records"],
+                "children": len(children),
+                "timeout_seconds": timeout.timeout_seconds,
+            }
+        record = defer_singleton(work, timeout)
+        return {
+            "event": "split-child-deferred",
+            "parent_chunk": parent["index"],
+            "part": chunk["part"],
+            "source_lines": [chunk["start_line"], chunk["end_line"]],
+            "eligible_line": record["eligible_line"],
+            "attempts": record["attempts"],
+            "timeout_seconds": timeout.timeout_seconds,
+        }
 
     try:
         if not unique_found:
@@ -1092,11 +1573,25 @@ def main(argv: list[str] | None = None) -> int:
             done, _ = concurrent.futures.wait(
                 futures, return_when=concurrent.futures.FIRST_COMPLETED
             )
+            completed_batch: list[tuple[dict[str, Any], ChunkComplete]] = []
+            timeout_batch: list[tuple[dict[str, Any], ChunkTimedOut]] = []
             for future in done:
                 work = futures.pop(future)
                 if work["kind"] == "split":
                     active_split_workers -= 1
-                path, result = future.result()
+                outcome = future.result()
+                if isinstance(outcome, tuple):
+                    outcome = ChunkComplete(*outcome)
+                if isinstance(outcome, ChunkTimedOut):
+                    timeout_batch.append((work, outcome))
+                else:
+                    completed_batch.append((work, outcome))
+
+            # Completed artifacts win a deadline batch. In particular, a
+            # unique result stops the run without manufacturing deferrals for
+            # other tasks whose timeouts became visible in the same batch.
+            for work, outcome in completed_batch:
+                path, result = outcome.path, outcome.result
                 if not algorithm_revision:
                     algorithm_revision = result["algorithm_revision"]
                     result = validate_artifact(
@@ -1118,6 +1613,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise RunError(
                         "completed chunk used a different scanner algorithm revision"
                     )
+                deferred_id = work.get("deferred_id")
+                if deferred_id in deferred_tasks:
+                    deferred_tasks.pop(deferred_id)
+                    persist_deferred_tasks()
                 unique_found |= result["unique"]
                 parent = work["parent"]
                 chunk = work["chunk"]
@@ -1161,12 +1660,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(event, sort_keys=True), flush=True)
                 if unique_found:
                     active.terminate_all()
-                    break
+            if unique_found:
+                break
+
+            for work, timeout in timeout_batch:
+                event = handle_timeout(work, timeout)
+                event.update(
+                    {
+                        "completed": completed_parent_count,
+                        "total": len(chunks),
+                        "deferred_singletons": len(deferred_tasks),
+                        "elapsed_seconds": round(time.monotonic() - started, 3),
+                    }
+                )
+                print(json.dumps(event, sort_keys=True), flush=True)
             if unique_found:
                 break
             fill_worker_lanes()
     except BaseException:
         active.terminate_all()
+        _run_lock.close()
         raise
     finally:
         executor.shutdown(wait=True, cancel_futures=True)
@@ -1190,6 +1703,21 @@ def main(argv: list[str] | None = None) -> int:
                 "split_manifest_set_sha256": manifest_digest.hexdigest(),
             }
         )
+    if deferred_path.exists():
+        deferred_digest = sha256(deferred_path)
+        summary.update(
+            {
+                "deferred_singletons": len(deferred_tasks),
+                "deferred_task_ids": sorted(deferred_tasks),
+                "deferred_eligible_lines": sorted(
+                    task["eligible_line"] for task in deferred_tasks.values()
+                ),
+                "deferred_manifest_bytes": deferred_path.stat().st_size,
+                "deferred_manifest_sha256": deferred_digest,
+            }
+        )
+    if deferred_tasks and summary["complete"]:
+        raise RunError("deferred singleton tasks cannot form a complete run")
     summary.update(
         {
             "corpus_sha256": corpus_hash,

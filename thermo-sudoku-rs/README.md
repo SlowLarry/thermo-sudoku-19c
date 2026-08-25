@@ -195,6 +195,9 @@ exactly partition its original source-line interval. The aggregate accepts
 either the parent artifact or the complete child partition, never both, and
 binds the manifest to the corpus, executable and algorithm revision. A separate
 `--split-workers` limit keeps pathological children from occupying every core.
+With timeout options enabled, an over-budget parent is split automatically and
+an over-budget singleton is recorded in identity-bound `deferred-tasks.json`.
+It is then skipped by ordinary resumes rather than executed indefinitely.
 
 For example, this resumes the production identity while subdividing four
 observed stragglers and assigning only one worker to their children:
@@ -206,13 +209,18 @@ python analysis/run_17c_overlap_chunks.py \
   --output-dir <artifact-root>/overlap-exact \
   --workers 4 --eligible-per-chunk 16 \
   --split-chunk 34 --split-chunk 515 \
-  --split-chunk 598 --split-chunk 675 --split-workers 1
+  --split-chunk 598 --split-chunk 675 --split-workers 1 \
+  --parent-timeout-seconds 1800 --singleton-timeout-seconds 300
 ```
 
 After the manifests have been published, an identical resume may omit the
 `--split-chunk` flags; they are discovered and validated automatically. This
 first split level isolates records, not individual solver candidates, so a
-single pathological record is still atomic.
+single pathological record remains atomic during one attempt. The five-minute
+limit now defers such a record and releases its worker. `--retry-deferred` is
+reserved for a deliberate later hard-record pass; it must not be used during
+the normal catalogue drain. A negative conclusion remains unavailable while
+any deferred singleton exists.
 
 The run directory is intentionally ignored and local. No complete generalized
 17-cell conclusion is claimed until its `summary.json` says `complete:true`,
