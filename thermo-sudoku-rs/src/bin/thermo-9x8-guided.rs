@@ -788,11 +788,39 @@ fn normalize_982(mut paths: Vec<Vec<u8>>) -> Result<FullLayout, String> {
             lengths[0], lengths[1], lengths[2]
         ));
     }
+    validate_disjoint_paths(paths.iter().map(Vec::as_slice))?;
     Ok(FullLayout {
         path9: paths.remove(0),
         path8: paths.remove(0),
         path2: paths.remove(0),
     })
+}
+
+fn validate_disjoint_paths<'a, I>(paths: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = &'a [u8]>,
+{
+    let mut occupied = [false; CELLS];
+    for (thermo, path) in paths.into_iter().enumerate() {
+        let mut local = [false; CELLS];
+        for &cell in path {
+            let cell = cell as usize;
+            if cell >= CELLS {
+                return Err(format!(
+                    "thermometer {thermo} contains out-of-range cell {cell}"
+                ));
+            }
+            if local[cell] {
+                return Err(format!("thermometer {thermo} repeats cell {cell}"));
+            }
+            if occupied[cell] {
+                return Err(format!("cell {cell} occurs in multiple thermometers"));
+            }
+            local[cell] = true;
+            occupied[cell] = true;
+        }
+    }
+    Ok(())
 }
 
 struct NestedPathParser<'a> {
@@ -2340,6 +2368,7 @@ fn decode_base(text: &str) -> Result<BaseLayout, String> {
     if canonical_base(base.clone()) != base {
         return Err("checkpoint base is not canonical".into());
     }
+    validate_disjoint_paths([base.path9.as_slice(), base.path8.as_slice()])?;
     Solver::blank(&[base.path9.clone(), base.path8.clone()])
         .map_err(|error| format!("invalid checkpoint base: {error}"))?;
     Ok(base)
@@ -2367,6 +2396,7 @@ fn decode_full(text: &str) -> Result<FullLayout, String> {
     if canonical_full(layout.clone()) != layout {
         return Err("checkpoint full layout is not canonical".into());
     }
+    validate_disjoint_paths(layout.paths().iter().map(Vec::as_slice))?;
     Solver::blank(&layout.paths())
         .map_err(|error| format!("invalid checkpoint layout: {error}"))?;
     Ok(layout)
@@ -2532,6 +2562,28 @@ mod tests {
         assert_eq!(anchors.len(), 1);
         assert_eq!(invalid[0].0, 3);
         assert!(invalid[0].1.contains("multiple thermometers"));
+    }
+
+    #[test]
+    fn checkpoint_decoders_reject_overlapping_disjoint_layouts() {
+        let base = canonical_base(BaseLayout {
+            path9: vec![0, 1, 2, 11, 10, 9, 18, 19, 20],
+            path8: vec![20, 29, 28, 27, 36, 37, 38, 39],
+        });
+        assert!(
+            decode_base(&encode_base(&base))
+                .unwrap_err()
+                .contains("multiple thermometers")
+        );
+
+        let mut full = known_layout();
+        full.path2 = vec![full.path9[0], full.path9[1]];
+        let full = canonical_full(full);
+        assert!(
+            decode_full(&encode_full(&full))
+                .unwrap_err()
+                .contains("multiple thermometers")
+        );
     }
 
     #[test]

@@ -3,8 +3,11 @@
 This note describes the broader search introduced after the disjoint
 four-through-seven-path enumeration developed a severe record-level heavy
 tail. It gives the mathematical reduction, implementation contract, exact run
-identity, and the checks required before a result can be claimed. The full
-catalogue run is in progress; no complete negative result is claimed here yet.
+identity, and the checks required before a result can be claimed. The first
+bounded catalogue pass ended with 46 of 25,370 eligible records deliberately
+deferred. A successor solver revision removes the identified DFS pathology, but
+no fresh complete production aggregate exists yet, so no complete negative
+result is claimed here.
 
 ## Scope
 
@@ -82,7 +85,7 @@ classification.
    reversal/digit-complement directions.
 6. Saturate and orient the comparisons, compute their transitive closures,
    deduplicate equal posets, and retain only inclusion-maximal closures.
-7. Ask the exact arbitrary-comparison Sudoku solver for a capped `0 / 1 / 2+`
+7. Ask the unified exact Sudoku/thermometer solver for a capped `0 / 1 / 2+`
    classification. The known catalogue target makes the zero case an internal
    consistency failure.
 
@@ -96,25 +99,35 @@ than by a separate `9!` loop. Simultaneously reversing that order and every
 comparison is global digit complement, so retaining one direction removes an
 exact fixed-point-free symmetry.
 
-The comparison solver uses 9-bit domains, the ordinary Sudoku singleton and
-house queues, one `u64` incident-edge mask per cell, and one `u64`
-dirty-comparison frontier. A domain change ORs every incident arc into that
-frontier. Any 17 grid cells induce at most 46 undirected king edges, so the
-64-edge frontier has exact headroom and no comparison is truncated. For
-`A < B`, revision removes from `B` every value not greater than the current
-minimum of `A`, and removes from `A` every value not smaller than the current
-maximum of `B`. Those bounds give exact arc consistency for this binary
-relation even when domains have holes. A restriction also dirties the cell's
-three Sudoku houses and queues a newly singleton cell; house revision includes
-hidden singles and locked candidates in addition to peer elimination. Changes
-requeue all neighbouring arcs, so overlapping branches reach a fixpoint before
-the exact MRV search continues, using incident-comparison degree as its tie
-break. Arc consistency alone is not claimed to decide an arbitrary network;
-exhaustive DFS supplies completeness. The API also accepts overlapping long
-paths by flattening and deduplicating their adjacent comparisons. Disjoint path
-inputs may delegate to the earlier specialized fast path, while this scanner
-calls `ComparisonSolver::blank` on explicit graphs and therefore always uses
-the generalized backend.
+There is now one solver implementation for both ordinary thermometer paths and
+overlapping comparison networks. It uses 9-bit domains, the ordinary Sudoku
+singleton and house queues, one `u64` incident-path mask per cell, and one
+`u64` dirty-path frontier. A domain change schedules every incident path. Each
+path is revised by a forward lower-bound sweep followed by a backward
+upper-bound sweep; this is generalized arc consistency for a strictly
+increasing chain, even when domains have holes. Changes at shared cells requeue
+every other incident path, so branches, merges, and diamonds reach a common
+fixpoint. A restriction also dirties the cell's three Sudoku houses and queues
+a newly singleton cell; house revision includes hidden singles and locked
+candidates in addition to peer elimination.
+
+The scanner calls `Solver::blank_comparisons`. Exact duplicate directed edges
+are removed and every remaining `(A, B)` is represented as the two-cell path
+`A < B`; no second solver or delegation layer exists. The path representation
+accepts 64 constraints. Any 17 grid cells induce at most 46 undirected king
+edges, so the saturated search has exact headroom and no comparison is
+truncated. Arc consistency alone is not claimed to decide an arbitrary network;
+exhaustive DFS supplies completeness. The same API also accepts overlapping
+long paths directly.
+
+DFS first minimizes domain size. Among tied cells it maximizes the number of
+still-unresolved Sudoku peers plus still-unresolved comparison neighbours. For
+the chosen cell, candidate values are scored by the immediate domain removals
+they cause in Sudoku peers and inequality neighbours and tried in descending
+score order, with a deterministic low-digit tie. This dynamic
+constraint-pressure/most-constraining-value rule replaces the former static
+thermometer degree and fixed low-digit-first value order. It changes only the
+order of an exhaustive search, not its solution set.
 
 The exact dominance steps are monotone. Masks and closures are compared on the
 fixed 17 clue-vertex labels. If adjacency mask `A` is contained in a realizable
@@ -146,11 +159,40 @@ launchers cannot mix artifacts in one output directory. Each worker writes a
 uniquely named `.partial` file. The parent checks its schema, algorithm
 revision, corpus fingerprint, exact line range, cap-two accounting and terminal
 completion flags before replacing the final chunk path. Interrupted partials
-are never counted. There is intentionally no durable checkpoint inside a
-launcher chunk: stopping preserves every published chunk but recomputes the at
-most four in-flight chunks on a four-worker run. Because rare chunks can take
-hours, suspending or lowering worker priority is preferable to terminating
-them for a temporary workstation break.
+are never counted. There is intentionally no durable checkpoint inside one
+launcher task: stopping preserves every published artifact but recomputes its
+unfinished task.
+
+The launcher can permanently replace an unfinished parent chunk with a
+deterministic split manifest. Its children each contain one eligible catalogue
+record and together form an exact, gap-free and overlap-free partition of the
+parent's inclusive source-line interval. Every manifest is bound to the corpus
+hash, executable hash and algorithm revision. A logical root is satisfied by
+exactly one evidence representation: either its original parent artifact or
+all of its validated children, never both. Orphan children, inconsistent
+revisions, parent/child ambiguity, and manifests whose declared child ranges
+are incomplete or overlapping are hard errors. Missing child artifacts remain
+pending work. Published split manifests are discovered automatically on
+later resumes, and separate artifact-set and manifest-set hashes make the
+selected evidence reproducible. `--split-workers` limits the split lane so a
+pathological child cannot consume every worker while ordinary chunks remain.
+
+The bounded scheduler adds two distinct timeout outcomes. A multi-record parent
+that exceeds `--parent-timeout-seconds` is terminated individually, reaped, and
+atomically replaced by its deterministic split manifest; its singleton
+children then enter the split queue. A child exceeding
+`--singleton-timeout-seconds` is not classified. Instead, its exact parent,
+part, source range, sole eligible line, attempt count, timeout and partial-file
+metadata are written atomically to identity-bound `deferred-tasks.json`. Other
+workers continue. Normal resumes skip deferred children; only an explicit
+`--retry-deferred` pass retries them.
+
+A timeout always means unresolved, never multiple, unique, or exhausted. Only a
+fully validated terminal JSONL contributes counts. If a valid final artifact
+wins the deadline race it supersedes the timeout; a later successful retry
+similarly removes its stale deferred entry. Partials are never evidence. The
+aggregate remains `complete:false` while any deferred singleton exists and
+records the deferred-manifest hash and exact line list.
 
 ```text
 python analysis/run_17c_overlap_chunks.py \
@@ -160,6 +202,41 @@ python analysis/run_17c_overlap_chunks.py \
   --workers 4 --eligible-per-chunk 16
 ```
 
+The audited intervention in the production run used:
+
+```text
+python analysis/run_17c_overlap_chunks.py \
+  --corpus <path-to>/17puz49158.txt \
+  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --output-dir <artifact-root>/overlap-exact \
+  --workers 4 --eligible-per-chunk 16 \
+  --split-chunk 34 --split-chunk 515 \
+  --split-chunk 598 --split-chunk 675 --split-workers 1
+```
+
+The repeated `--split-chunk` options are needed only to commit new manifests;
+normal resumes auto-adopt existing ones. This implementation subdivides at
+record boundaries. A pathological single record, and an individual
+`count_up_to(2)` call within it, remain atomic and may require a later
+candidate-level or solver-frontier split.
+
+After a second all-worker stall, the final bounded `v1` production restart used:
+
+```text
+python analysis/run_17c_overlap_chunks.py \
+  --corpus <path-to>/17puz49158.txt \
+  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --output-dir <artifact-root>/overlap-exact \
+  --workers 4 --eligible-per-chunk 16 --split-workers 1 \
+  --split-chunk 676 --split-chunk 766 --split-chunk 767 \
+  --parent-timeout-seconds 1800 --singleton-timeout-seconds 300
+```
+
+The four older split manifests are adopted automatically. The three new flags
+avoid repeating already-observed multi-hour parent work. One split lane and
+three ordinary lanes preserve catalogue throughput. The main pass deliberately
+omits `--retry-deferred`; hard records are a separately auditable backlog.
+
 The scanner also has an in-process checkpoint for bounded diagnostics. It
 writes a synced same-directory temporary and installs it with a validated
 backup fallback, binding the state to the flushed JSONL byte prefix. A resume
@@ -168,7 +245,11 @@ The chunk runner deliberately avoids frequent checkpoints: on a small exact
 record, syncing every 32 candidates was measured at about 6.8 times the
 checkpoint-free runtime.
 
-## Reproduction and exact run identity
+## Reproduction and frozen `v1` run identity
+
+This section freezes the implementation and artifacts of the incomplete `v1`
+production pass. The successor solver below deliberately has different source,
+binary, and algorithm identities; its output cannot be appended to this run.
 
 The catalogue is not vendored because the combined 49,158 archive does not
 restate a licence for its seven post-Royle additions. Download
@@ -182,7 +263,7 @@ restate a licence for its seven post-Royle additions. Download
 | `src/comparison.rs` | 48,618 | `75D7F7D1604FC718C8647136E013E9F375A24E7A6F5757EAD59D85B287B27981` |
 | `src/lib.rs` | 92,036 | `599A8C4E14B4F856F9891AF894368E764A20CDF8E39849751C2B6F8ECDDA75C8` |
 | `src/bin/thermo-17c-overlap.rs` | 121,659 | `17769B0068DBB01F0D0EC59AD40C4B5605E250113ED4914C7626369DE7C3F066` |
-| `analysis/run_17c_overlap_chunks.py` | 28,259 | `C94DE5A7ECFC2EB80A31CFC88B38E6D2CD63F157E8983A39A7E15375300D7F89` |
+| `analysis/run_17c_overlap_chunks.py` | 66,457 | `CC65595F253BEF0185757303A8009E4ACD98EE319866C3150C70AF6173C24626` |
 | run's `thermo-17c-overlap.exe` | 408,576 | `117DC22FCBD0914AED6D9A8D88C9964D5A403A9FB1CCE0F64C93346D2F17B658` |
 
 The executable was built in release mode on
@@ -210,8 +291,14 @@ domains and cover branches, diamonds, cycles, dense 17-cell graphs, disjoint
 fast-path parity, and randomized exact solution-set comparisons. Scanner tests
 brute-check mask dominance, Hamiltonian orders, closure antichains, morph
 realization, resume equivalence, path-alias rejection, and checkpoint/output
-safety. Runner tests cover identity binding, artifact accounting, dry-run
-non-mutation and the exclusive output-directory lock.
+safety. Runner tests cover identity binding, artifact accounting, the exclusive
+output-directory lock, deterministic child covers, manifest
+binding, parent-versus-children exclusivity, restart behavior, safe bootstrap
+failure, stable child-failure reporting, and aggregate accounting over logical
+roots. Timeout tests cover process-local cancellation, parent auto-split,
+durable singleton deferral and retry, exact ledger validation, deadline-final
+and unique-result races, stale-entry reconciliation, and total-start budgets.
+The full Python analysis test discovery passed 39 tests for this revision.
 
 The production identity is schema `thermo-17c-overlap-chunk-run-v1`, algorithm
 revision `saturated-axis-poset-antichain-hamiltonian-v1`, corpus FNV-1a64
@@ -222,7 +309,7 @@ above with those explicit options. A read-only planning check is available as:
 ```text
 python analysis/run_17c_overlap_chunks.py \
   --corpus <path-to>/17puz49158.txt \
-  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --binary <path-to-frozen-v1-thermo-17c-overlap.exe> \
   --output-dir <artifact-root>/overlap-exact \
   --workers 4 --eligible-per-chunk 16 --dry-run
 ```
@@ -231,6 +318,27 @@ The `--dry-run` output must report the same corpus and binary hashes, 25,370
 eligible records and 1,586 chunks. The actual run directory is local under
 ignored `runs/`; neither partial progress nor a future result is silently
 included in the Git commit.
+
+### Successor `v2` implementation identity
+
+The unified solver revision was built and validated on 2026-08-25 with the same
+Rust/Cargo 1.94.0 MSVC toolchain. Its pre-run identities are:
+
+| Input or implementation | Bytes | SHA-256 |
+|---|---:|---|
+| `17puz49158.txt` | 4,080,114 | `58EF7D83E8CBAC32495161F9745877FEF82F5E8B3FE58E3CAD4EB3FC004A81B9` |
+| `thermo-sudoku-rs/Cargo.toml` | 357 | `2EF150F573911E9890DB35DC9D6858CCB5B084F337C99CF146D2163F2A6BB25F` |
+| `src/lib.rs` | 106,593 | `6C3FFCE7C751F5F354143A025B28B7081D8381B7F3B38D947775FDB9F2250D91` |
+| `src/bin/thermo-17c-overlap.rs` | 121,675 | `76D89F253CC97CBEF0696AE89B0CCFAFB7F3F6EB97EBB7AA6ECE403F9414D621` |
+| `analysis/run_17c_overlap_chunks.py` | 66,457 | `CC65595F253BEF0185757303A8009E4ACD98EE319866C3150C70AF6173C24626` |
+| release `thermo-17c-overlap.exe` | 401,920 | `23E3491164A658A1F59E705483D37C97CC2F383CBA4C4267A9F3CBC43EBDB215` |
+
+`src/comparison.rs` no longer exists: its overlap functionality was folded into
+`Solver` in `src/lib.rs`. The release all-target suite passed 159 tests; one
+additional exhaustive regression was deliberately ignored. Strict Clippy and
+formatting checks passed, as did all 39 Python analysis tests. A production run
+must additionally record these identities in a fresh `run-identity.json` and
+reproduce the algorithm revision stated above.
 
 ## Bounded measurements
 
@@ -257,14 +365,94 @@ more than ten hours each. A censor-aware estimate at that snapshot was roughly
 record only. They neither sample the remaining catalogue uniformly nor support
 a mathematical completion percentage.
 
+At 2026-08-24 21:35 CEST the first launcher invocation was deliberately stopped
+after 671 parent chunks had been published: 10,736 eligible records and
+30,930,497 closure-maximal candidates had been classified, with no unique case
+or error. Four in-flight parent chunks had then occupied cores for roughly 26,
+8.2, 6.8 and 4.0 hours. Across the 671 completed chunks, elapsed time correlated
+almost perfectly with solver nodes (Pearson `r = 0.9986`) but not with candidate
+count (`r = 0.0357`), locating the heavy tail inside the Sudoku comparison
+search rather than morph enumeration. The four parents were committed to exact
+one-record child partitions and the run was resumed with one split worker and
+three ordinary workers. All 671 published artifacts were retained; four
+zero-length interrupted partials were ignored. This intervention changes only
+scheduling and evidence packaging, not the candidate set or classification
+algorithm, and it is not a search result.
+
+The record-only intervention then exposed the flaw in retaining a permanently
+active hard lane. At the controlled 2026-08-25 07:09 CEST stop, 760 parent
+artifacts and six singleton children covered 12,166 eligible records and
+34,901,476 classified candidates, all multiple, with zero unique or zero-solution
+errors. No artifact had been published since 02:02. The four active tasks had
+run for about 9.6, 9.6, 7.4 and 5.1 hours; the split task was already the single
+eligible record on catalogue line 835. This confirmed that record subdivision
+identifies the hard case but does not by itself prevent renewed saturation.
+
+The bounded policy follows the measured tail. Only 19 of the 760 completed
+parents exceeded 30 minutes, but they consumed 52.09 of 69.47 aggregate scanner
+hours. Parents therefore receive 1,800 seconds before automatic subdivision,
+while singleton records receive 300 seconds before deferral. The latter is
+generous relative to the six completed siblings of line 835, which each took
+under four seconds. These thresholds affect scheduling only; they cannot turn
+an unresolved case into evidence.
+
+That bounded `v1` pass ended normally on 2026-08-25 with `complete:false`.
+It completed 1,552 of 1,586 logical roots through 2,050 validated parent/child
+artifacts, covering 25,324 of 25,370 eligible catalogue records. The remaining
+46 singleton records, distributed across 34 split parents, are listed in the
+identity-bound deferred ledger. The completed work classified 65,390,245
+candidates, all multiple, with zero unique and zero impossible target cases.
+Those counts are substantial partial evidence but not an exhaustive result.
+
 A target-aware shortcut was implemented and measured, then rejected for the
 scanner. It stopped after the first solution differing from the 17 mapped
 catalogue clues, and every candidate on lines 1 and 803 did take that shortcut.
 Nevertheless the expensive work was reaching the first solution, not finding
 the second: line 803 remained at about 16.6 million nodes and slowed from about
-19.1 to 24.2 seconds, while line 1 also became slightly slower. The generic
-solver keeps the audited target-projection API, but the production scanner uses
-the faster ordinary cap-two traversal.
+19.1 to 24.2 seconds, while line 1 also became slightly slower. That experimental
+API was not retained in the unified solver; the scanner uses ordinary exact
+cap-two traversal.
+
+## Unified solver revision and hard-record diagnosis
+
+The deferred records exposed a branch-order pathology, not difficult puzzle
+structure and not a flaw in overlap propagation. Reconstructing all candidates
+for all 46 records took only 9.27 seconds, including process startup and input
+parsing. On catalogue line 835, candidates 945 and 946 (one-based) have nearly
+identical edge and closure counts. The former found two solutions in 41 nodes,
+while the old fixed low-first search explored ten million nodes on the latter
+without reaching a solution. Reversing every inequality, which is equivalent
+under global digit complement, made the same latter case finish in 47 nodes.
+Removing redundant comparison edges did not remove the tail.
+
+The original path solver used the same low-first ordering and reproduced the
+pathology on a weaker cell-disjoint sublayout under selected grid morphs. The
+fix therefore belongs in the common DFS rather than in a separate overlap
+backend. `Layout` now records every path incident to each cell, so the original
+chain propagator supports overlaps directly. `Solver::blank_comparisons`
+deduplicates explicit edges and presents them to that same engine as two-cell
+paths. The former standalone comparison module has been removed.
+
+With dynamic constraint-pressure cell selection and most-constraining-first
+values, line 835 candidate 946 takes 29 to 41 nodes across all eight dihedral
+morphs and both complement orientations. A fresh release diagnostic then ran
+all 170,831 candidates of the 46 deferred records exactly and without node
+limits or fallback solvers: all 170,831 were multiple, with zero unique and zero
+impossible target cases, in 158.814 seconds and 73,198,384 total nodes. Five
+individual candidates still account for almost all of that residual tail, but
+the longest record took 106.753 seconds rather than hours.
+
+Additional disposable diagnostics covered all 20,464 morph/complement cases of
+1,279 valid disjoint 9+8+2 layouts (maximum 66 nodes) and compared 10,000 fully
+exhausted random overlap graphs with a temporary build of the frozen `v1`
+comparison source identified above; every complete solution set agreed. The
+diagnostic harness and output are not retained evidence. The tracked release
+suite separately checks overlapping incremental propagation against a full-scan
+reference and explicit graphs against complete solution filtering. The
+successor scanner revision is
+`saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2`. A fresh
+complete run and aggregate audit are still required before the 17-cell question
+can be reported closed.
 
 The retained historical pilot artifacts are:
 
@@ -288,17 +476,25 @@ Before reporting a negative result, an auditor must at minimum check:
 1. the corpus SHA-256, record count and syntax;
 2. `run-identity.json` against the executable hash, algorithm revision, chunk
    size, eligible count and total chunk count above;
-3. that the 1,586 chunk filenames form the runner's exact contiguous partition
-   of source lines 1 through 49,158, with no gaps or overlaps;
-4. every chunk through the launcher's `validate_artifact` checks, including
+3. that each of the 1,586 logical parent chunks is represented by either its
+   parent artifact or one committed, complete child partition, never both, and
+   that the selected leaves cover source lines 1 through 49,158 exactly once;
+4. every selected leaf through the launcher's `validate_artifact` checks and
+   every split manifest against its bound corpus, executable, revision, parent
+   range and exact child cover, including
    header/summary fingerprint agreement, exact range exhaustion, target-true
    zero count of zero, and `classified = unique + multiple` cap-two
-   accounting; and
-5. terminal `summary.json` fields `complete:true`,
+   accounting;
+5. that `deferred-tasks.json`, if present, passes its schema and run-identity
+   validation, has an empty task list, matches the aggregate's recomputed
+   `deferred_manifest_sha256`, and that the aggregate reports zero deferred
+   singletons; and
+6. terminal `summary.json` fields `complete:true`,
    `completed_chunks:1586`, `unique_found:false`, `totals.unique:0`, and an
-   artifact-set SHA-256 recomputed from the validated chunk names and hashes.
+   artifact-set SHA-256 plus split-manifest-set SHA-256 recomputed from the
+   validated selected leaves and manifests.
 
-Running the identical launcher command after completion performs checks 2–5
+Running the identical launcher command after completion performs checks 2–6
 again and has no pending work. This independently validates the orchestration
 and accounting, but it does not turn the negative into a proof certificate:
 multiplicity of the non-emitted ordinary cases and exhaustiveness of the

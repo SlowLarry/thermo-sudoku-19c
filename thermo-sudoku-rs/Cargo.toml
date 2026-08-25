@@ -2,7 +2,7 @@
 name = "thermo-sudoku"
 version = "0.1.0"
 edition = "2024"
-description = "Capped solution counter for classic Sudoku with disjoint thermometers"
+description = "Capped solution counter for classic Sudoku with overlapping thermometers"
 publish = false
 
 [lib]

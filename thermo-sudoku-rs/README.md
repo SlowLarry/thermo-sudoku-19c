@@ -1,32 +1,28 @@
 # thermo-sudoku
 
-Dependency-free Rust reference solvers for classic 9x9 Sudoku with strict
-thermometer inequalities. The original `Solver` is specialized for
-cell-disjoint paths; `ComparisonSolver` handles shared cells, overlaps, and
-branching networks. Orthogonal and diagonal king-neighbour steps are allowed,
-and geometrically crossing diagonal segments are not cell overlaps.
+Dependency-free Rust solver for classic 9x9 Sudoku with strict thermometer
+inequalities. One `Solver` handles cell-disjoint paths, shared cells, overlaps,
+branches, merges, and explicit directed comparisons. Orthogonal and diagonal
+king-neighbour steps are allowed, and geometrically crossing diagonal segments
+are not cell overlaps.
 
 The solver returns a capped count and is optimized for the `0 / 1 / 2+` query.
-It uses 9-bit candidate domains, a deduplicating event queue, bit-parallel
-Sudoku-house propagation, and thermo-aware inherited branch ordering. A
-thermometer is revised by one forward lower-bound sweep and one backward
-upper-bound sweep. Because a thermometer is a simple constraint path, this
-arc-consistency pass is also generalized arc consistency for the complete
-increasing sequence.
+It uses 9-bit candidate domains, bit-parallel Sudoku-house propagation, and one
+`u64` incident-path mask per cell. Restricting a domain schedules every
+thermometer incident to that cell. A dirty path is revised by one forward
+lower-bound sweep and one backward upper-bound sweep; this is generalized arc
+consistency for a strict increasing chain, including domains with holes.
+Overlapping paths requeue one another through their shared cells until the
+ordinary singleton, house, and thermometer queues reach a common fixpoint.
 
-`ComparisonSolver` is not a mode switch on the disjoint-path representation.
-It stores deduplicated directed comparisons explicitly, together with one
-`u64` incident-edge mask per cell and one `u64` dirty frontier for the whole
-network. Restricting a domain schedules every edge incident to that cell; each
-dirty `A < B` edge removes unsupported values from both endpoints and may in
-turn schedule all neighbouring edges. The ordinary singleton and Sudoku-house
-queues run in the same fixpoint loop, followed by exact depth-first search.
-This is what makes shared cells and branches exact without introducing a
-general-purpose constraint framework. Inputs which are genuinely disjoint
-paths may still delegate to the original faster `Solver`. The public backend
-rejects graphs above 64 distinct comparisons; this is complete for the exact
-17-cell search because any 17 grid cells induce at most 46 undirected
-king-neighbour edges.
+Explicit `(lower, upper)` comparisons are deduplicated and represented as
+two-cell thermometers in that same engine. The public representation accepts at
+most 64 path constraints. This is complete for the exact 17-cell saturated
+search because any 17 grid cells induce at most 46 undirected king-neighbour
+edges. Exact DFS chooses a minimum-domain cell, breaks ties by the number of
+still-unresolved Sudoku and comparison neighbours, then tries values in
+most-constraining-first order. This state-dependent ordering replaces the old
+fixed low-digit-first behavior that caused severe morph-dependent tails.
 
 Build and test:
 
@@ -167,9 +163,10 @@ optimized `thermo-17c-maximal` fallback searches the remaining merge-maximal
 representatives and
 `analysis/run_17c_maximal_chunks.py` schedules restart-safe small ranges.
 
-`ComparisonSolver` is the exact generalized oracle for shared cells,
-overlapping paths, and branching comparison networks. `thermo-17c-overlap`
-uses it with a saturation theorem: for each catalogue morph and relabelling it
+The unified `Solver` is the exact oracle for shared cells, overlapping paths,
+and branching comparison networks. `thermo-17c-overlap` calls
+`Solver::blank_comparisons` and uses a saturation theorem: for each catalogue
+morph and relabelling it
 tests the network containing every target-true king-neighbour comparison on
 the 17 cells. If any smaller overlapping network were unique, this stronger
 network would be unique as well; when arbitrary two-cell thermometers are
@@ -185,13 +182,56 @@ python analysis/run_17c_overlap_chunks.py \
   --workers 4 --eligible-per-chunk 16
 ```
 
-The first full exact run began on 2026-08-23 with 1,586 chunks over 25,370
-eligible catalogue records. It exposed a much heavier runtime tail than the
-100-record timing pilot: most chunks are short, while a few can occupy a core
+The first exact production pass began on 2026-08-23 with 1,586 chunks over
+25,370 eligible catalogue records. It exposed a much heavier runtime tail than
+the 100-record timing pilot: most chunks were short, while a few occupied a core
 for many hours. Completed chunks are independently validated before atomic
-publication and are skipped on restart. A hard stop preserves them but must
-redo any in-flight chunks, so suspension or reduced process priority is safer
-during temporary workstation use.
+publication and are skipped on restart. An unfinished parent chunk may be
+committed to a deterministic split manifest whose one-eligible-record children
+exactly partition its original source-line interval. The aggregate accepts
+either the parent artifact or the complete child partition, never both, and
+binds the manifest to the corpus, executable and algorithm revision. A separate
+`--split-workers` limit keeps pathological children from occupying every core.
+With timeout options enabled, an over-budget parent is split automatically and
+an over-budget singleton is recorded in identity-bound `deferred-tasks.json`.
+It is then skipped by ordinary resumes rather than executed indefinitely.
+
+For example, this resumes the production identity while subdividing four
+observed stragglers and assigning only one worker to their children:
+
+```text
+python analysis/run_17c_overlap_chunks.py \
+  --corpus <path-to>/17puz49158.txt \
+  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
+  --output-dir <artifact-root>/overlap-exact \
+  --workers 4 --eligible-per-chunk 16 \
+  --split-chunk 34 --split-chunk 515 \
+  --split-chunk 598 --split-chunk 675 --split-workers 1 \
+  --parent-timeout-seconds 1800 --singleton-timeout-seconds 300
+```
+
+After the manifests have been published, an identical resume may omit the
+`--split-chunk` flags; they are discovered and validated automatically. This
+first split level isolates records, not individual solver candidates, so a
+single pathological record remains atomic during one attempt. The five-minute
+limit now defers such a record and releases its worker. `--retry-deferred` is
+reserved for a deliberate later hard-record pass; it must not be used during
+the normal catalogue drain. A negative conclusion remains unavailable while
+any deferred singleton exists.
+
+The bounded pass ended with 25,324 eligible records complete and 46 singleton
+records deferred. It classified 65,390,245 candidates, all multiple, but remains
+explicitly incomplete. Those 46 records were then profiled outside the
+production artifact set. Candidate construction was subsecond per record; the
+cost came from rare individual DFS calls under the old low-first value order.
+The solver is now unified and uses dynamic constraint pressure plus
+most-constraining-first values. The overlap scanner identifies this successor
+as `saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2`; its
+output must use a fresh run directory and cannot resume or be aggregated with
+the earlier `...-v1` artifacts. An exact unbounded diagnostic replay processed
+all 170,831 candidates from the 46 deferred records in 158.814 seconds; every
+candidate was multiple. This validates the fix but is not a substitute for a
+fresh complete `v2` production aggregate.
 
 The run directory is intentionally ignored and local. No complete generalized
 17-cell conclusion is claimed until its `summary.json` says `complete:true`,

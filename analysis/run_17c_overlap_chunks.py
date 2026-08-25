@@ -12,11 +12,14 @@ directory at a time and is released automatically if the launcher crashes.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import threading
@@ -29,6 +32,12 @@ CORPUS_RECORDS = 49_158
 CORPUS_FNV1A64 = 0x96BAF249978384BB
 SCANNER_SCHEMA = "thermo-17c-overlap-v1"
 RUN_SCHEMA = "thermo-17c-overlap-chunk-run-v1"
+SPLIT_SCHEMA = "thermo-17c-overlap-split-manifest-v1"
+DEFERRED_SCHEMA = "thermo-17c-overlap-deferred-tasks-v1"
+SPLIT_MANIFEST_RE = re.compile(r"^split-chunk-(\d{5})\.json$")
+SPLIT_ARTIFACT_RE = re.compile(
+    r"^chunk-(\d{5})-part-(\d{4})-lines-(\d{5})-(\d{5})\.jsonl$"
+)
 FNV_OFFSET = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
 
@@ -72,6 +81,30 @@ COUNT_FIELDS = (
 
 class RunError(RuntimeError):
     pass
+
+
+class ChunkComplete:
+    def __init__(self, path: Path, result: dict[str, Any]) -> None:
+        self.path = path
+        self.result = result
+
+
+class ChunkTimedOut:
+    def __init__(
+        self,
+        task_label: str,
+        partial_path: Path,
+        timeout_seconds: float,
+        partial_exists: bool,
+        partial_bytes: int,
+        partial_sha256: str | None,
+    ) -> None:
+        self.task_label = task_label
+        self.partial_path = partial_path
+        self.timeout_seconds = timeout_seconds
+        self.partial_exists = partial_exists
+        self.partial_bytes = partial_bytes
+        self.partial_sha256 = partial_sha256
 
 
 class OutputDirectoryLock:
@@ -222,6 +255,308 @@ def artifact_name(chunk: dict[str, int]) -> str:
     )
 
 
+def split_manifest_name(parent: dict[str, int]) -> str:
+    return f"split-chunk-{parent['index']:05d}.json"
+
+
+def split_artifact_name(parent: dict[str, int], child: dict[str, int]) -> str:
+    return (
+        f"chunk-{parent['index']:05d}-part-{child['part']:04d}-lines-"
+        f"{child['start_line']:05d}-{child['end_line']:05d}.jsonl"
+    )
+
+
+def make_split_children(
+    parent: dict[str, int], records: list[str]
+) -> list[dict[str, int]]:
+    """Partition one parent range into contiguous one-eligible-record children."""
+
+    children: list[dict[str, int]] = []
+    start = parent["start_line"]
+    for line_number in range(parent["start_line"], parent["end_line"] + 1):
+        if not eligible(records[line_number - 1]):
+            continue
+        children.append(
+            {
+                "part": len(children) + 1,
+                "start_line": start,
+                "end_line": line_number,
+                "eligible_records": 1,
+            }
+        )
+        start = line_number + 1
+    if not children:
+        raise RunError(
+            f"chunk {parent['index']} has no eligible record and cannot be split"
+        )
+    if start <= parent["end_line"]:
+        children[-1]["end_line"] = parent["end_line"]
+    validate_split_partition(parent, children, records)
+    return children
+
+
+def validate_split_partition(
+    parent: dict[str, int],
+    children: list[dict[str, int]],
+    records: list[str],
+) -> None:
+    if not children:
+        raise RunError(f"chunk {parent['index']} has an empty child partition")
+    expected_start = parent["start_line"]
+    eligible_total = 0
+    for expected_part, child in enumerate(children, 1):
+        if child.get("part") != expected_part:
+            raise RunError(f"chunk {parent['index']} child indices are not contiguous")
+        start = child.get("start_line")
+        end = child.get("end_line")
+        if start != expected_start or not isinstance(end, int) or end < start:
+            raise RunError(f"chunk {parent['index']} child ranges have a gap or overlap")
+        if end > parent["end_line"]:
+            raise RunError(f"chunk {parent['index']} child range exceeds its parent")
+        actual_eligible = sum(eligible(records[line - 1]) for line in range(start, end + 1))
+        if actual_eligible != 1 or child.get("eligible_records") != 1:
+            raise RunError(
+                f"chunk {parent['index']} child {expected_part} must contain one eligible record"
+            )
+        eligible_total += actual_eligible
+        expected_start = end + 1
+    if expected_start != parent["end_line"] + 1:
+        raise RunError(f"chunk {parent['index']} child ranges do not cover their parent")
+    if eligible_total != parent["eligible_records"]:
+        raise RunError(f"chunk {parent['index']} child eligible count mismatch")
+
+
+def split_manifest_value(
+    parent: dict[str, int],
+    children: list[dict[str, int]],
+    corpus_hash: str,
+    binary_hash: str,
+    eligible_per_chunk: int,
+    algorithm_revision: str | None,
+) -> dict[str, Any]:
+    return {
+        "schema": SPLIT_SCHEMA,
+        "run_schema": RUN_SCHEMA,
+        "corpus_sha256": corpus_hash,
+        "binary_sha256": binary_hash,
+        "eligible_per_parent_chunk": eligible_per_chunk,
+        "algorithm_revision": algorithm_revision or None,
+        "parent": {
+            **parent,
+            "artifact": artifact_name(parent),
+        },
+        "children": [
+            {
+                **child,
+                "artifact": split_artifact_name(parent, child),
+            }
+            for child in children
+        ],
+    }
+
+
+def validate_split_manifest(
+    path: Path,
+    parent: dict[str, int],
+    children: list[dict[str, int]],
+    corpus_hash: str,
+    binary_hash: str,
+    eligible_per_chunk: int,
+    algorithm_revision: str | None,
+) -> str | None:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RunError(f"cannot read split manifest {path}: {error}") from error
+    if not isinstance(manifest, dict):
+        raise RunError(f"{path}: split manifest is not an object")
+    revision = manifest.get("algorithm_revision")
+    if revision is not None and (not isinstance(revision, str) or not revision):
+        raise RunError(f"{path}: invalid split-manifest algorithm revision")
+    expected = split_manifest_value(
+        parent,
+        children,
+        corpus_hash,
+        binary_hash,
+        eligible_per_chunk,
+        revision,
+    )
+    if manifest != expected:
+        raise RunError(f"{path}: split manifest does not match its exact parent partition")
+    if algorithm_revision and revision and revision != algorithm_revision:
+        raise RunError(f"{path}: split-manifest algorithm revision mismatch")
+    return revision
+
+
+def deferred_task_id(parent: dict[str, int], child: dict[str, int]) -> str:
+    return split_artifact_name(parent, child).removesuffix(".jsonl")
+
+
+def deferred_task_static(
+    parent: dict[str, int], child: dict[str, int], records: list[str]
+) -> dict[str, Any]:
+    eligible_lines = [
+        line
+        for line in range(child["start_line"], child["end_line"] + 1)
+        if eligible(records[line - 1])
+    ]
+    if len(eligible_lines) != 1 or child["eligible_records"] != 1:
+        raise RunError(
+            f"chunk {parent['index']} part {child['part']} is not a singleton"
+        )
+    return {
+        "id": deferred_task_id(parent, child),
+        "parent_chunk": parent["index"],
+        "part": child["part"],
+        "start_line": child["start_line"],
+        "end_line": child["end_line"],
+        "eligible_records": 1,
+        "eligible_line": eligible_lines[0],
+        "artifact": split_artifact_name(parent, child),
+    }
+
+
+def deferred_manifest_value(
+    tasks: dict[str, dict[str, Any]],
+    corpus_hash: str,
+    binary_hash: str,
+    eligible_per_chunk: int,
+    algorithm_revision: str,
+) -> dict[str, Any]:
+    return {
+        "schema": DEFERRED_SCHEMA,
+        "run_schema": RUN_SCHEMA,
+        "corpus_sha256": corpus_hash,
+        "binary_sha256": binary_hash,
+        "eligible_per_parent_chunk": eligible_per_chunk,
+        "algorithm_revision": algorithm_revision,
+        "tasks": [tasks[key] for key in sorted(tasks)],
+    }
+
+
+def validate_deferred_manifest(
+    path: Path,
+    split_children: dict[int, list[dict[str, int]]],
+    records: list[str],
+    corpus_hash: str,
+    binary_hash: str,
+    eligible_per_chunk: int,
+    algorithm_revision: str,
+) -> dict[str, dict[str, Any]]:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RunError(f"cannot read deferred-task manifest {path}: {error}") from error
+    expected_header = {
+        "schema": DEFERRED_SCHEMA,
+        "run_schema": RUN_SCHEMA,
+        "corpus_sha256": corpus_hash,
+        "binary_sha256": binary_hash,
+        "eligible_per_parent_chunk": eligible_per_chunk,
+        "algorithm_revision": algorithm_revision,
+    }
+    if not isinstance(manifest, dict) or any(
+        manifest.get(key) != value for key, value in expected_header.items()
+    ):
+        raise RunError(f"{path}: deferred-task manifest identity mismatch")
+    raw_tasks = manifest.get("tasks")
+    if not isinstance(raw_tasks, list):
+        raise RunError(f"{path}: deferred tasks must be a list")
+    allowed: dict[str, dict[str, Any]] = {}
+    allowed_partial_prefixes: dict[str, tuple[str, str]] = {}
+    for parent_index, children in split_children.items():
+        parent = {
+            "index": parent_index,
+            "start_line": children[0]["start_line"],
+            "end_line": children[-1]["end_line"],
+            "eligible_records": len(children),
+        }
+        for child in children:
+            static = deferred_task_static(parent, child, records)
+            allowed[static["id"]] = static
+            allowed_partial_prefixes[static["id"]] = (
+                f".{static['artifact']}.",
+                f".{artifact_name(parent)}.",
+            )
+    tasks: dict[str, dict[str, Any]] = {}
+    for index, task in enumerate(raw_tasks, 1):
+        if not isinstance(task, dict):
+            raise RunError(f"{path}: deferred task {index} is not an object")
+        task_id = task.get("id")
+        if not isinstance(task_id, str) or task_id in tasks or task_id not in allowed:
+            raise RunError(f"{path}: deferred task {index} is duplicate or orphaned")
+        static = allowed[task_id]
+        if any(task.get(key) != value for key, value in static.items()):
+            raise RunError(f"{path}: deferred task {task_id} metadata mismatch")
+        expected_keys = set(static) | {
+            "attempts",
+            "last_timeout_seconds",
+            "last_partial",
+            "last_partial_exists",
+            "last_partial_bytes",
+            "last_partial_sha256",
+        }
+        if set(task) != expected_keys:
+            raise RunError(f"{path}: deferred task {task_id} has unexpected fields")
+        attempts = task.get("attempts")
+        timeout_seconds = task.get("last_timeout_seconds")
+        partial = task.get("last_partial")
+        partial_exists = task.get("last_partial_exists")
+        partial_bytes = task.get("last_partial_bytes")
+        partial_hash = task.get("last_partial_sha256")
+        if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts <= 0:
+            raise RunError(f"{path}: deferred task {task_id} has invalid attempts")
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
+            raise RunError(f"{path}: deferred task {task_id} has invalid timeout")
+        valid_partial_name = False
+        if isinstance(partial, str) and Path(partial).name == partial:
+            valid_partial_name = any(
+                partial.startswith(prefix)
+                and re.fullmatch(
+                    r"[0-9a-f]{32}\.partial", partial[len(prefix) :]
+                )
+                is not None
+                for prefix in allowed_partial_prefixes[task_id]
+            )
+        if not valid_partial_name:
+            raise RunError(f"{path}: deferred task {task_id} has invalid partial path")
+        if not isinstance(partial_exists, bool):
+            raise RunError(f"{path}: deferred task {task_id} has invalid partial flag")
+        if (
+            not isinstance(partial_bytes, int)
+            or isinstance(partial_bytes, bool)
+            or partial_bytes < 0
+        ):
+            raise RunError(f"{path}: deferred task {task_id} has invalid partial size")
+        if partial_exists:
+            if (
+                not isinstance(partial_hash, str)
+                or len(partial_hash) != 64
+                or any(character not in "0123456789abcdef" for character in partial_hash)
+            ):
+                raise RunError(f"{path}: deferred task {task_id} has invalid partial hash")
+        elif partial_hash is not None or partial_bytes != 0:
+            raise RunError(f"{path}: absent deferred partial has size or hash")
+        tasks[task_id] = task
+    if [task["id"] for task in raw_tasks] != sorted(tasks):
+        raise RunError(f"{path}: deferred tasks are not in deterministic order")
+    expected = deferred_manifest_value(
+        tasks,
+        corpus_hash,
+        binary_hash,
+        eligible_per_chunk,
+        algorithm_revision,
+    )
+    if manifest != expected:
+        raise RunError(f"{path}: deferred-task manifest has unexpected fields")
+    return tasks
+
+
 def nonnegative(record: dict[str, Any], key: str, context: str) -> int:
     value = record.get(key)
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -366,10 +701,22 @@ class ActiveProcesses:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._processes: set[subprocess.Popen[str]] = set()
+        self._stopping = False
 
     def add(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
-            self._processes.add(process)
+            if not self._stopping:
+                self._processes.add(process)
+                return
+        # A future can enter run_chunk just after a unique result snapshots the
+        # registry. The terminal flag closes that registration race: a scanner
+        # created after global stop is terminated immediately and cannot make
+        # executor shutdown wait for a full task.
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
 
     def discard(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
@@ -377,10 +724,14 @@ class ActiveProcesses:
 
     def terminate_all(self) -> None:
         with self._lock:
+            self._stopping = True
             processes = tuple(self._processes)
         for process in processes:
             if process.poll() is None:
-                process.terminate()
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
 
 
 def run_chunk(
@@ -391,8 +742,12 @@ def run_chunk(
     records: list[str],
     algorithm_revision: str,
     active: ActiveProcesses,
-) -> tuple[Path, dict[str, Any]]:
-    final_path = output_dir / artifact_name(chunk)
+    final_name: str | None = None,
+    task_label: str | None = None,
+    timeout_seconds: float | None = None,
+) -> ChunkComplete | ChunkTimedOut:
+    label = task_label or f"chunk {chunk.get('index', '?')}"
+    final_path = output_dir / (final_name or artifact_name(chunk))
     temporary = output_dir / f".{final_path.name}.{uuid.uuid4().hex}.partial"
     command = [
         str(binary),
@@ -428,13 +783,58 @@ def run_chunk(
         creationflags=flags,
     )
     active.add(process)
+    timed_out = False
+    stdout = ""
+    stderr = ""
     try:
-        stdout, stderr = process.communicate()
+        try:
+            if timeout_seconds is None:
+                stdout, stderr = process.communicate()
+            else:
+                stdout, stderr = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
+            try:
+                stdout, stderr = process.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                if process.poll() is None:
+                    process.kill()
+                stdout, stderr = process.communicate()
     finally:
         active.discard(process)
+    stdout = stdout or ""
+    stderr = stderr or ""
+    if timed_out:
+        # A scanner can finish and flush its terminal summary exactly as the
+        # deadline fires. A fully valid artifact wins that race; anything less
+        # remains incomplete and is represented by the timeout outcome.
+        if temporary.exists():
+            try:
+                result = validate_artifact(
+                    temporary, chunk, records, algorithm_revision
+                )
+            except Exception:
+                pass
+            else:
+                os.replace(temporary, final_path)
+                return ChunkComplete(final_path, result)
+        partial_exists = temporary.exists()
+        return ChunkTimedOut(
+            task_label=label,
+            partial_path=temporary,
+            timeout_seconds=float(timeout_seconds),
+            partial_exists=partial_exists,
+            partial_bytes=temporary.stat().st_size if partial_exists else 0,
+            partial_sha256=sha256(temporary) if partial_exists else None,
+        )
     if process.returncode != 0:
         raise RunError(
-            f"chunk {chunk['index']} scanner exit {process.returncode}; "
+            f"{label} scanner exit {process.returncode}; "
             f"stdout={stdout[-2000:]!r}; stderr={stderr[-4000:]!r}; "
             f"partial={temporary}"
         )
@@ -442,10 +842,10 @@ def run_chunk(
         result = validate_artifact(temporary, chunk, records, algorithm_revision)
     except Exception as error:
         raise RunError(
-            f"chunk {chunk['index']} left invalid partial artifact {temporary}: {error}"
+            f"{label} left invalid partial artifact {temporary}: {error}"
         ) from error
     os.replace(temporary, final_path)
-    return final_path, result
+    return ChunkComplete(final_path, result)
 
 
 def aggregate(
@@ -453,18 +853,19 @@ def aggregate(
     chunks: list[dict[str, int]],
     records: list[str],
     algorithm_revision: str,
+    split_children: dict[int, list[dict[str, int]]] | None = None,
 ) -> dict[str, Any]:
+    split_children = split_children or {}
     totals = {key: 0 for key in COUNT_FIELDS}
     artifact_digest = hashlib.sha256()
     artifact_bytes = 0
-    exhausted = 0
+    completed_chunks = 0
+    completed_artifacts = 0
     unique = False
-    for chunk in chunks:
-        path = output_dir / artifact_name(chunk)
-        if not path.exists():
-            continue
-        result = validate_artifact(path, chunk, records, algorithm_revision)
-        exhausted += int(result["exhausted"])
+
+    def add_artifact(path: Path, result: dict[str, Any]) -> None:
+        nonlocal artifact_bytes, completed_artifacts, unique
+        completed_artifacts += 1
         unique |= result["unique"]
         artifact_bytes += result["bytes"]
         artifact_digest.update(path.name.encode("ascii"))
@@ -472,17 +873,60 @@ def aggregate(
         artifact_digest.update(bytes.fromhex(result["sha256"]))
         for key in COUNT_FIELDS:
             totals[key] += result["summary"][key]
-    return {
+
+    for chunk in chunks:
+        parent_path = output_dir / artifact_name(chunk)
+        children = split_children.get(chunk["index"])
+        child_paths = (
+            [output_dir / split_artifact_name(chunk, child) for child in children]
+            if children
+            else []
+        )
+        if parent_path.exists() and children:
+            raise RunError(
+                f"chunk {chunk['index']} is committed as split but has a parent artifact"
+            )
+        if parent_path.exists():
+            result = validate_artifact(
+                parent_path, chunk, records, algorithm_revision
+            )
+            completed_chunks += int(result["exhausted"])
+            add_artifact(parent_path, result)
+            continue
+        if not children:
+            continue
+        validate_split_partition(chunk, children, records)
+        child_results: list[dict[str, Any]] = []
+        for child, path in zip(children, child_paths, strict=True):
+            if not path.exists():
+                continue
+            result = validate_artifact(path, child, records, algorithm_revision)
+            child_results.append(result)
+            add_artifact(path, result)
+        if len(child_results) == len(children) and all(
+            result["exhausted"] for result in child_results
+        ):
+            completed_chunks += 1
+
+    summary = {
         "schema": RUN_SCHEMA,
         "algorithm_revision": algorithm_revision,
-        "complete": exhausted == len(chunks),
+        "complete": completed_chunks == len(chunks),
         "unique_found": unique,
         "chunks": len(chunks),
-        "completed_chunks": exhausted,
+        "completed_chunks": completed_chunks,
         "artifact_bytes": artifact_bytes,
         "artifact_set_sha256": artifact_digest.hexdigest(),
         "totals": totals,
     }
+    if split_children:
+        summary.update(
+            {
+                "split_parent_chunks": sorted(split_children),
+                "completed_artifacts": completed_artifacts,
+            }
+        )
+    return summary
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -492,6 +936,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--eligible-per-chunk", type=int, default=16)
+    parser.add_argument(
+        "--split-chunk",
+        type=int,
+        action="append",
+        default=[],
+        help="replace one unfinished parent chunk by deterministic one-eligible children",
+    )
+    parser.add_argument(
+        "--split-workers",
+        type=int,
+        default=1,
+        help="maximum concurrent split-child scanners (default: 1)",
+    )
+    parser.add_argument(
+        "--parent-timeout-seconds",
+        type=float,
+        help="wall limit for a multi-record parent before it is split",
+    )
+    parser.add_argument(
+        "--singleton-timeout-seconds",
+        type=float,
+        help="wall limit for a split singleton before durable deferral",
+    )
+    parser.add_argument(
+        "--retry-deferred",
+        action="store_true",
+        help="retry singleton tasks from the durable deferred backlog",
+    )
     parser.add_argument("--max-new-chunks", type=int)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -505,15 +977,72 @@ def read_revision(path: Path) -> str:
     return revision
 
 
+def run_identity_value(
+    corpus_data: bytes,
+    corpus_hash: str,
+    binary: Path,
+    binary_hash: str,
+    chunks: list[dict[str, int]],
+    eligible_per_chunk: int,
+    algorithm_revision: str,
+) -> dict[str, Any]:
+    return {
+        "schema": RUN_SCHEMA,
+        "corpus_bytes": len(corpus_data),
+        "corpus_sha256": corpus_hash,
+        "corpus_fnv1a64": f"{CORPUS_FNV1A64:016x}",
+        "records": chunks[-1]["end_line"] if chunks else 0,
+        "binary_bytes": binary.stat().st_size,
+        "binary_sha256": binary_hash,
+        "eligible_per_chunk": eligible_per_chunk,
+        "eligible_records": sum(chunk["eligible_records"] for chunk in chunks),
+        "chunks": len(chunks),
+        "algorithm_revision": algorithm_revision,
+    }
+
+
+def split_manifest_indices(output_dir: Path) -> set[int]:
+    indices: set[int] = set()
+    for path in output_dir.glob("split-chunk-*.json"):
+        match = SPLIT_MANIFEST_RE.fullmatch(path.name)
+        if match is None:
+            raise RunError(f"unexpected split manifest name: {path}")
+        index = int(match.group(1))
+        if index in indices:
+            raise RunError(f"duplicate split manifest for chunk {index}")
+        indices.add(index)
+    return indices
+
+
+def existing_split_artifacts(output_dir: Path) -> list[Path]:
+    paths: list[Path] = []
+    for path in output_dir.glob("chunk-*-part-*-lines-*-*.jsonl"):
+        if SPLIT_ARTIFACT_RE.fullmatch(path.name) is None:
+            raise RunError(f"unexpected split artifact name: {path}")
+        paths.append(path)
+    return paths
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if (
         args.workers <= 0
+        or args.split_workers <= 0
+        or args.split_workers > args.workers
         or args.eligible_per_chunk <= 0
         or args.max_new_chunks is not None
         and args.max_new_chunks <= 0
     ):
-        raise RunError("workers, chunk size, and max-new-chunks must be positive")
+        raise RunError(
+            "workers, split-workers, chunk size, and max-new-chunks must be "
+            "positive, with split-workers no greater than workers"
+        )
+    for option, value in (
+        ("parent timeout", args.parent_timeout_seconds),
+        ("singleton timeout", args.singleton_timeout_seconds),
+    ):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise RunError(f"{option} must be finite and positive")
     corpus = args.corpus.resolve()
     binary = args.binary.resolve()
     output_dir = args.output_dir.resolve()
@@ -525,12 +1054,18 @@ def main(argv: list[str] | None = None) -> int:
         raise RunError("output directory must not contain the scanner binary")
     corpus_data, records = parse_corpus(corpus)
     chunks = make_chunks(records, args.eligible_per_chunk)
+    chunk_by_index = {chunk["index"]: chunk for chunk in chunks}
+    explicit_split_ids = set(args.split_chunk)
+    invalid_split_ids = sorted(explicit_split_ids - chunk_by_index.keys())
+    if invalid_split_ids:
+        raise RunError(f"unknown split chunk indices: {invalid_split_ids}")
     binary_hash = sha256(binary)
     corpus_hash = hashlib.sha256(corpus_data).hexdigest()
     identity_path = output_dir / "run-identity.json"
     summary_path = output_dir / "summary.json"
+    deferred_path = output_dir / "deferred-tasks.json"
     lock_path = output_dir / ".thermo-17c-overlap-runner.lock"
-    for reserved in (identity_path, summary_path, lock_path):
+    for reserved in (identity_path, summary_path, deferred_path, lock_path):
         if reserved.exists() and (
             os.path.samefile(reserved, corpus) or os.path.samefile(reserved, binary)
         ):
@@ -544,6 +1079,19 @@ def main(argv: list[str] | None = None) -> int:
         "chunks": len(chunks),
     }
     if args.dry_run:
+        if explicit_split_ids:
+            dry_identity.update(
+                {
+                    "split_parent_chunks": sorted(explicit_split_ids),
+                    "split_workers": args.split_workers,
+                }
+            )
+        if args.parent_timeout_seconds is not None:
+            dry_identity["parent_timeout_seconds"] = args.parent_timeout_seconds
+        if args.singleton_timeout_seconds is not None:
+            dry_identity["singleton_timeout_seconds"] = (
+                args.singleton_timeout_seconds
+            )
         print(json.dumps(dry_identity, sort_keys=True))
         return 0
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -556,180 +1104,620 @@ def main(argv: list[str] | None = None) -> int:
             "algorithm_revision"
         ]:
             raise RunError("run identity has no scanner algorithm revision")
-        expected_identity = {
-            "schema": RUN_SCHEMA,
-            "corpus_bytes": len(corpus_data),
-            "corpus_sha256": corpus_hash,
-            "corpus_fnv1a64": f"{CORPUS_FNV1A64:016x}",
-            "records": len(records),
-            "binary_bytes": binary.stat().st_size,
-            "binary_sha256": binary_hash,
-            "eligible_per_chunk": args.eligible_per_chunk,
-            "eligible_records": sum(chunk["eligible_records"] for chunk in chunks),
-            "chunks": len(chunks),
-            "algorithm_revision": identity.get("algorithm_revision"),
-        }
+        expected_identity = run_identity_value(
+            corpus_data,
+            corpus_hash,
+            binary,
+            binary_hash,
+            chunks,
+            args.eligible_per_chunk,
+            identity["algorithm_revision"],
+        )
         if identity != expected_identity:
             raise RunError("output directory belongs to a different exact run")
         algorithm_revision = identity["algorithm_revision"]
-    completed: dict[int, tuple[Path, dict[str, Any]]] = {}
-    pending: list[dict[str, int]] = []
-    existing_paths = [
+
+    parent_paths = [
         output_dir / artifact_name(chunk)
         for chunk in chunks
         if (output_dir / artifact_name(chunk)).exists()
     ]
-    for path in existing_paths:
+    for path in parent_paths:
         if os.path.samefile(path, corpus) or os.path.samefile(path, binary):
             raise RunError(f"chunk artifact aliases an input file: {path}")
-    if not algorithm_revision and existing_paths:
-        algorithm_revision = read_revision(existing_paths[0])
+    if not algorithm_revision and parent_paths:
+        algorithm_revision = read_revision(parent_paths[0])
+    prevalidated_parents: dict[int, tuple[Path, dict[str, Any]]] = {}
     for chunk in chunks:
         path = output_dir / artifact_name(chunk)
         if path.exists():
-            completed[chunk["index"]] = (
+            prevalidated_parents[chunk["index"]] = (
                 path,
                 validate_artifact(path, chunk, records, algorithm_revision),
             )
-        else:
-            pending.append(chunk)
+
+    persisted_split_ids = split_manifest_indices(output_dir)
+    invalid_persisted_ids = sorted(persisted_split_ids - chunk_by_index.keys())
+    if invalid_persisted_ids:
+        raise RunError(
+            f"split manifests name unknown parent chunks: {invalid_persisted_ids}"
+        )
+    split_ids = persisted_split_ids | explicit_split_ids
+    split_children = {
+        index: make_split_children(chunk_by_index[index], records)
+        for index in sorted(split_ids)
+    }
+    for index in sorted(split_ids):
+        if index in prevalidated_parents:
+            raise RunError(
+                f"chunk {index} is committed as split but also has a parent artifact"
+            )
+
+    manifest_revisions: set[str] = set()
+    for index in sorted(persisted_split_ids):
+        parent = chunk_by_index[index]
+        manifest_path = output_dir / split_manifest_name(parent)
+        if os.path.samefile(manifest_path, corpus) or os.path.samefile(
+            manifest_path, binary
+        ):
+            raise RunError(f"split manifest aliases an input file: {manifest_path}")
+        revision = validate_split_manifest(
+            manifest_path,
+            parent,
+            split_children[index],
+            corpus_hash,
+            binary_hash,
+            args.eligible_per_chunk,
+            algorithm_revision or None,
+        )
+        if revision is None:
+            raise RunError(f"{manifest_path}: split manifest has no algorithm revision")
+        manifest_revisions.add(revision)
+    if len(manifest_revisions) > 1:
+        raise RunError("split manifests use different scanner algorithm revisions")
+    if manifest_revisions:
+        manifest_revision = next(iter(manifest_revisions))
+        if algorithm_revision and algorithm_revision != manifest_revision:
+            raise RunError("split manifests do not match the exact run revision")
+        algorithm_revision = manifest_revision
+    if split_ids and not algorithm_revision:
+        raise RunError(
+            "splitting requires an established run identity or a validated parent artifact"
+        )
+    if (
+        args.parent_timeout_seconds is not None
+        or args.singleton_timeout_seconds is not None
+    ) and not algorithm_revision:
+        raise RunError("task timeouts require an established run identity")
 
     if algorithm_revision and not identity_path.exists():
         atomic_json(
             identity_path,
-            {
-                "schema": RUN_SCHEMA,
-                "corpus_bytes": len(corpus_data),
-                "corpus_sha256": corpus_hash,
-                "corpus_fnv1a64": f"{CORPUS_FNV1A64:016x}",
-                "records": len(records),
-                "binary_bytes": binary.stat().st_size,
-                "binary_sha256": binary_hash,
-                "eligible_per_chunk": args.eligible_per_chunk,
-                "eligible_records": sum(
-                    item["eligible_records"] for item in chunks
-                ),
-                "chunks": len(chunks),
-                "algorithm_revision": algorithm_revision,
-            },
+            run_identity_value(
+                corpus_data,
+                corpus_hash,
+                binary,
+                binary_hash,
+                chunks,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            ),
         )
 
-    if args.max_new_chunks is not None:
-        pending = pending[: args.max_new_chunks]
-    print(
-        json.dumps(
-            {
-                "event": "resume",
-                "chunks": len(chunks),
-                "completed": len(completed),
-                "selected_this_invocation": len(pending),
-                "workers": args.workers,
-            },
-            sort_keys=True,
-        ),
-        flush=True,
+    for index in sorted(split_ids):
+        parent = chunk_by_index[index]
+        manifest_path = output_dir / split_manifest_name(parent)
+        manifest = split_manifest_value(
+            parent,
+            split_children[index],
+            corpus_hash,
+            binary_hash,
+            args.eligible_per_chunk,
+            algorithm_revision,
+        )
+        if manifest_path.exists():
+            validate_split_manifest(
+                manifest_path,
+                parent,
+                split_children[index],
+                corpus_hash,
+                binary_hash,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            )
+        else:
+            atomic_json(manifest_path, manifest)
+
+    allowed_split_paths: dict[Path, tuple[dict[str, int], dict[str, int]]] = {}
+    for index, children in split_children.items():
+        parent = chunk_by_index[index]
+        for child in children:
+            allowed_split_paths[output_dir / split_artifact_name(parent, child)] = (
+                parent,
+                child,
+            )
+    for path in existing_split_artifacts(output_dir):
+        if path not in allowed_split_paths:
+            raise RunError(f"orphan split artifact has no committed manifest: {path}")
+        if os.path.samefile(path, corpus) or os.path.samefile(path, binary):
+            raise RunError(f"split artifact aliases an input file: {path}")
+
+    deferred_tasks: dict[str, dict[str, Any]] = {}
+    deferred_changed = False
+    if deferred_path.exists():
+        if os.path.samefile(deferred_path, corpus) or os.path.samefile(
+            deferred_path, binary
+        ):
+            raise RunError(f"deferred-task manifest aliases an input: {deferred_path}")
+        if not algorithm_revision:
+            raise RunError("deferred tasks require an established run identity")
+        deferred_tasks = validate_deferred_manifest(
+            deferred_path,
+            split_children,
+            records,
+            corpus_hash,
+            binary_hash,
+            args.eligible_per_chunk,
+            algorithm_revision,
+        )
+
+    completed_parents: dict[int, tuple[Path, dict[str, Any]]] = {}
+    completed_children: dict[tuple[int, int], tuple[Path, dict[str, Any]]] = {}
+    ordinary_pending: list[dict[str, Any]] = []
+    split_pending: list[dict[str, Any]] = []
+    for chunk in chunks:
+        if chunk["index"] in split_children:
+            for child in split_children[chunk["index"]]:
+                path = output_dir / split_artifact_name(chunk, child)
+                if path.exists():
+                    completed_children[(chunk["index"], child["part"])] = (
+                        path,
+                        validate_artifact(
+                            path, child, records, algorithm_revision
+                        ),
+                    )
+                    task_id = deferred_task_id(chunk, child)
+                    if task_id in deferred_tasks:
+                        deferred_tasks.pop(task_id)
+                        deferred_changed = True
+                else:
+                    task_id = deferred_task_id(chunk, child)
+                    if task_id not in deferred_tasks or args.retry_deferred:
+                        split_pending.append(
+                            {
+                                "kind": "split",
+                                "parent": chunk,
+                                "chunk": child,
+                                "artifact": split_artifact_name(chunk, child),
+                                "deferred_id": (
+                                    task_id if task_id in deferred_tasks else None
+                                ),
+                            }
+                        )
+            continue
+        path = output_dir / artifact_name(chunk)
+        if path.exists():
+            completed_parents[chunk["index"]] = prevalidated_parents[chunk["index"]]
+        else:
+            ordinary_pending.append(
+                {
+                    "kind": "parent",
+                    "parent": chunk,
+                    "chunk": chunk,
+                    "artifact": artifact_name(chunk),
+                }
+            )
+
+    if deferred_path.exists() and deferred_changed:
+        atomic_json(
+            deferred_path,
+            deferred_manifest_value(
+                deferred_tasks,
+                corpus_hash,
+                binary_hash,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            ),
+        )
+
+    child_exhausted_counts = {
+        index: sum(
+            completed_children.get((index, child["part"]), (None, {}))[1].get(
+                "exhausted", False
+            )
+            for child in children
+        )
+        for index, children in split_children.items()
+    }
+    completed_parent_count = (
+        sum(result["exhausted"] for _, result in completed_parents.values())
+        + sum(
+            child_exhausted_counts[index] == len(children)
+            for index, children in split_children.items()
+        )
+        if split_children
+        else len(completed_parents)
     )
+    all_existing_results = [
+        result for _, result in completed_parents.values()
+    ] + [result for _, result in completed_children.values()]
+
+    if args.max_new_chunks is not None:
+        budget = args.max_new_chunks
+        selected_split = split_pending[: min(args.split_workers, budget)]
+        budget -= len(selected_split)
+        selected_ordinary = ordinary_pending[:budget]
+        budget -= len(selected_ordinary)
+        if budget:
+            selected_split.extend(
+                split_pending[len(selected_split) : len(selected_split) + budget]
+            )
+        ordinary_pending = selected_ordinary
+        split_pending = selected_split
+    resume_event: dict[str, Any] = {
+        "event": "resume",
+        "chunks": len(chunks),
+        "completed": completed_parent_count,
+        "selected_this_invocation": len(ordinary_pending) + len(split_pending),
+        "workers": args.workers,
+    }
+    if split_children:
+        resume_event.update(
+            {
+                "split_parent_chunks": sorted(split_children),
+                "split_workers": args.split_workers,
+                "completed_artifacts": len(completed_parents)
+                + len(completed_children),
+            }
+        )
+    if deferred_path.exists() or deferred_tasks:
+        resume_event.update(
+            {
+                "deferred_singletons": len(deferred_tasks),
+                "retry_deferred": args.retry_deferred,
+            }
+        )
+    if args.parent_timeout_seconds is not None:
+        resume_event["parent_timeout_seconds"] = args.parent_timeout_seconds
+    if args.singleton_timeout_seconds is not None:
+        resume_event["singleton_timeout_seconds"] = (
+            args.singleton_timeout_seconds
+        )
+    print(json.dumps(resume_event, sort_keys=True), flush=True)
 
     started = time.monotonic()
     active = ActiveProcesses()
-    unique_found = any(result["unique"] for _, result in completed.values())
-    iterator = iter(pending)
+    unique_found = any(result["unique"] for result in all_existing_results)
+    ordinary_queue = deque(ordinary_pending)
+    split_queue = deque(split_pending)
     futures: dict[
-        concurrent.futures.Future[tuple[Path, dict[str, Any]]], dict[str, int]
+        concurrent.futures.Future[ChunkComplete | ChunkTimedOut], dict[str, Any]
     ] = {}
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
+    active_split_workers = 0
+    remaining_start_budget = args.max_new_chunks
+
+    def submit(work: dict[str, Any]) -> None:
+        nonlocal active_split_workers, remaining_start_budget
+        if remaining_start_budget is not None:
+            if remaining_start_budget <= 0:
+                raise AssertionError("task start budget exhausted")
+            remaining_start_budget -= 1
+        parent = work["parent"]
+        chunk = work["chunk"]
+        task_label = f"chunk {parent['index']}"
+        if work["kind"] == "split":
+            task_label += f" part {chunk['part']}"
+        timeout_seconds = (
+            args.parent_timeout_seconds
+            if work["kind"] == "parent"
+            else args.singleton_timeout_seconds
+        )
+        future = executor.submit(
+            run_chunk,
+            binary,
+            corpus,
+            output_dir,
+            work["chunk"],
+            records,
+            algorithm_revision,
+            active,
+            work["artifact"],
+            task_label,
+            timeout_seconds,
+        )
+        futures[future] = work
+        active_split_workers += int(work["kind"] == "split")
+
+    def fill_worker_lanes() -> None:
+        while (
+            split_queue
+            and active_split_workers < args.split_workers
+            and len(futures) < args.workers
+            and (remaining_start_budget is None or remaining_start_budget > 0)
+        ):
+            submit(split_queue.popleft())
+        while (
+            ordinary_queue
+            and len(futures) < args.workers
+            and (remaining_start_budget is None or remaining_start_budget > 0)
+        ):
+            submit(ordinary_queue.popleft())
+
+    def child_work(
+        parent: dict[str, int], child: dict[str, int]
+    ) -> dict[str, Any]:
+        task_id = deferred_task_id(parent, child)
+        return {
+            "kind": "split",
+            "parent": parent,
+            "chunk": child,
+            "artifact": split_artifact_name(parent, child),
+            "deferred_id": task_id if task_id in deferred_tasks else None,
+        }
+
+    def commit_split_parent(parent: dict[str, int]) -> list[dict[str, int]]:
+        index = parent["index"]
+        if index in split_children:
+            return split_children[index]
+        if (output_dir / artifact_name(parent)).exists():
+            raise RunError(f"cannot split completed parent chunk {index}")
+        children = make_split_children(parent, records)
+        manifest_path = output_dir / split_manifest_name(parent)
+        manifest = split_manifest_value(
+            parent,
+            children,
+            corpus_hash,
+            binary_hash,
+            args.eligible_per_chunk,
+            algorithm_revision,
+        )
+        if manifest_path.exists():
+            validate_split_manifest(
+                manifest_path,
+                parent,
+                children,
+                corpus_hash,
+                binary_hash,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            )
+        else:
+            # Publication precedes the in-memory queue update, so a crash can
+            # only cause a later resume to regenerate the exact child backlog.
+            atomic_json(manifest_path, manifest)
+        split_children[index] = children
+        child_exhausted_counts[index] = 0
+        return children
+
+    def persist_deferred_tasks() -> None:
+        atomic_json(
+            deferred_path,
+            deferred_manifest_value(
+                deferred_tasks,
+                corpus_hash,
+                binary_hash,
+                args.eligible_per_chunk,
+                algorithm_revision,
+            ),
+        )
+
+    def defer_singleton(
+        work: dict[str, Any], timeout: ChunkTimedOut
+    ) -> dict[str, Any]:
+        parent = work["parent"]
+        child = work["chunk"]
+        static = deferred_task_static(parent, child, records)
+        previous = deferred_tasks.get(static["id"])
+        record = {
+            **static,
+            "attempts": (previous["attempts"] if previous else 0) + 1,
+            "last_timeout_seconds": timeout.timeout_seconds,
+            "last_partial": timeout.partial_path.name,
+            "last_partial_exists": timeout.partial_exists,
+            "last_partial_bytes": timeout.partial_bytes,
+            "last_partial_sha256": timeout.partial_sha256,
+        }
+        deferred_tasks[static["id"]] = record
+        # The exact singleton ledger is durable before another task is allowed
+        # into the released worker lane.
+        persist_deferred_tasks()
+        return record
+
+    def handle_timeout(
+        work: dict[str, Any], timeout: ChunkTimedOut
+    ) -> dict[str, Any]:
+        parent = work["parent"]
+        chunk = work["chunk"]
+        if work["kind"] == "parent":
+            children = commit_split_parent(parent)
+            if len(children) == 1:
+                singleton = child_work(parent, children[0])
+                record = defer_singleton(singleton, timeout)
+                return {
+                    "event": "parent-timeout-deferred-singleton",
+                    "chunk": parent["index"],
+                    "source_lines": [
+                        children[0]["start_line"],
+                        children[0]["end_line"],
+                    ],
+                    "eligible_line": record["eligible_line"],
+                    "attempts": record["attempts"],
+                    "timeout_seconds": timeout.timeout_seconds,
+                }
+            for child in children:
+                split_queue.append(child_work(parent, child))
+            return {
+                "event": "parent-timeout-auto-split",
+                "chunk": parent["index"],
+                "source_lines": [parent["start_line"], parent["end_line"]],
+                "eligible_records": parent["eligible_records"],
+                "children": len(children),
+                "timeout_seconds": timeout.timeout_seconds,
+            }
+        record = defer_singleton(work, timeout)
+        return {
+            "event": "split-child-deferred",
+            "parent_chunk": parent["index"],
+            "part": chunk["part"],
+            "source_lines": [chunk["start_line"], chunk["end_line"]],
+            "eligible_line": record["eligible_line"],
+            "attempts": record["attempts"],
+            "timeout_seconds": timeout.timeout_seconds,
+        }
+
     try:
         if not unique_found:
-            for _ in range(min(args.workers, len(pending))):
-                chunk = next(iterator)
-                future = executor.submit(
-                    run_chunk,
-                    binary,
-                    corpus,
-                    output_dir,
-                    chunk,
-                    records,
-                    algorithm_revision,
-                    active,
-                )
-                futures[future] = chunk
+            fill_worker_lanes()
         while futures:
             done, _ = concurrent.futures.wait(
                 futures, return_when=concurrent.futures.FIRST_COMPLETED
             )
+            completed_batch: list[tuple[dict[str, Any], ChunkComplete]] = []
+            timeout_batch: list[tuple[dict[str, Any], ChunkTimedOut]] = []
             for future in done:
-                chunk = futures.pop(future)
-                path, result = future.result()
+                work = futures.pop(future)
+                if work["kind"] == "split":
+                    active_split_workers -= 1
+                outcome = future.result()
+                if isinstance(outcome, tuple):
+                    outcome = ChunkComplete(*outcome)
+                if isinstance(outcome, ChunkTimedOut):
+                    timeout_batch.append((work, outcome))
+                else:
+                    completed_batch.append((work, outcome))
+
+            # Completed artifacts win a deadline batch. In particular, a
+            # unique result stops the run without manufacturing deferrals for
+            # other tasks whose timeouts became visible in the same batch.
+            for work, outcome in completed_batch:
+                path, result = outcome.path, outcome.result
                 if not algorithm_revision:
                     algorithm_revision = result["algorithm_revision"]
-                    result = validate_artifact(path, chunk, records, algorithm_revision)
-                    identity = {
-                        "schema": RUN_SCHEMA,
-                        "corpus_bytes": len(corpus_data),
-                        "corpus_sha256": corpus_hash,
-                        "corpus_fnv1a64": f"{CORPUS_FNV1A64:016x}",
-                        "records": len(records),
-                        "binary_bytes": binary.stat().st_size,
-                        "binary_sha256": binary_hash,
-                        "eligible_per_chunk": args.eligible_per_chunk,
-                        "eligible_records": sum(
-                            item["eligible_records"] for item in chunks
+                    result = validate_artifact(
+                        path, work["chunk"], records, algorithm_revision
+                    )
+                    atomic_json(
+                        identity_path,
+                        run_identity_value(
+                            corpus_data,
+                            corpus_hash,
+                            binary,
+                            binary_hash,
+                            chunks,
+                            args.eligible_per_chunk,
+                            algorithm_revision,
                         ),
-                        "chunks": len(chunks),
-                        "algorithm_revision": algorithm_revision,
-                    }
-                    atomic_json(identity_path, identity)
+                    )
                 elif result["algorithm_revision"] != algorithm_revision:
                     raise RunError(
                         "completed chunk used a different scanner algorithm revision"
                     )
-                completed[chunk["index"]] = (path, result)
+                deferred_id = work.get("deferred_id")
+                if deferred_id in deferred_tasks:
+                    deferred_tasks.pop(deferred_id)
+                    persist_deferred_tasks()
                 unique_found |= result["unique"]
-                print(
-                    json.dumps(
-                        {
-                            "event": "chunk-complete",
-                            "chunk": chunk["index"],
-                            "completed": len(completed),
-                            "total": len(chunks),
-                            "source_lines": [chunk["start_line"], chunk["end_line"]],
-                            "eligible_records": chunk["eligible_records"],
-                            "classified": result["summary"]["classified_units"],
-                            "unique": result["summary"]["unique"],
-                            "elapsed_seconds": round(time.monotonic() - started, 3),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
+                parent = work["parent"]
+                chunk = work["chunk"]
+                if work["kind"] == "parent":
+                    completed_parents[parent["index"]] = (path, result)
+                    completed_parent_count += int(result["exhausted"])
+                    event = {
+                        "event": "chunk-complete",
+                        "chunk": parent["index"],
+                        "completed": completed_parent_count,
+                        "total": len(chunks),
+                        "source_lines": [chunk["start_line"], chunk["end_line"]],
+                        "eligible_records": chunk["eligible_records"],
+                        "classified": result["summary"]["classified_units"],
+                        "unique": result["summary"]["unique"],
+                        "elapsed_seconds": round(time.monotonic() - started, 3),
+                    }
+                else:
+                    completed_children[(parent["index"], chunk["part"])] = (
+                        path,
+                        result,
+                    )
+                    if result["exhausted"]:
+                        child_exhausted_counts[parent["index"]] += 1
+                        if child_exhausted_counts[parent["index"]] == len(
+                            split_children[parent["index"]]
+                        ):
+                            completed_parent_count += 1
+                    event = {
+                        "event": "split-child-complete",
+                        "parent_chunk": parent["index"],
+                        "part": chunk["part"],
+                        "completed": completed_parent_count,
+                        "total": len(chunks),
+                        "source_lines": [chunk["start_line"], chunk["end_line"]],
+                        "eligible_records": chunk["eligible_records"],
+                        "classified": result["summary"]["classified_units"],
+                        "unique": result["summary"]["unique"],
+                        "elapsed_seconds": round(time.monotonic() - started, 3),
+                    }
+                print(json.dumps(event, sort_keys=True), flush=True)
                 if unique_found:
                     active.terminate_all()
-                    break
-                try:
-                    next_chunk = next(iterator)
-                except StopIteration:
-                    pass
-                else:
-                    next_future = executor.submit(
-                        run_chunk,
-                        binary,
-                        corpus,
-                        output_dir,
-                        next_chunk,
-                        records,
-                        algorithm_revision,
-                        active,
-                    )
-                    futures[next_future] = next_chunk
             if unique_found:
                 break
+
+            for work, timeout in timeout_batch:
+                event = handle_timeout(work, timeout)
+                event.update(
+                    {
+                        "completed": completed_parent_count,
+                        "total": len(chunks),
+                        "deferred_singletons": len(deferred_tasks),
+                        "elapsed_seconds": round(time.monotonic() - started, 3),
+                    }
+                )
+                print(json.dumps(event, sort_keys=True), flush=True)
+            if unique_found:
+                break
+            fill_worker_lanes()
     except BaseException:
         active.terminate_all()
+        _run_lock.close()
         raise
     finally:
         executor.shutdown(wait=True, cancel_futures=True)
 
-    summary = aggregate(output_dir, chunks, records, algorithm_revision)
+    summary = aggregate(
+        output_dir, chunks, records, algorithm_revision, split_children
+    )
+    if split_children:
+        manifest_digest = hashlib.sha256()
+        manifest_bytes = 0
+        for index in sorted(split_children):
+            path = output_dir / split_manifest_name(chunk_by_index[index])
+            digest = sha256(path)
+            manifest_bytes += path.stat().st_size
+            manifest_digest.update(path.name.encode("ascii"))
+            manifest_digest.update(b"\0")
+            manifest_digest.update(bytes.fromhex(digest))
+        summary.update(
+            {
+                "split_manifest_bytes": manifest_bytes,
+                "split_manifest_set_sha256": manifest_digest.hexdigest(),
+            }
+        )
+    if deferred_path.exists():
+        deferred_digest = sha256(deferred_path)
+        summary.update(
+            {
+                "deferred_singletons": len(deferred_tasks),
+                "deferred_task_ids": sorted(deferred_tasks),
+                "deferred_eligible_lines": sorted(
+                    task["eligible_line"] for task in deferred_tasks.values()
+                ),
+                "deferred_manifest_bytes": deferred_path.stat().st_size,
+                "deferred_manifest_sha256": deferred_digest,
+            }
+        )
+    if deferred_tasks and summary["complete"]:
+        raise RunError("deferred singleton tasks cannot form a complete run")
     summary.update(
         {
             "corpus_sha256": corpus_hash,
