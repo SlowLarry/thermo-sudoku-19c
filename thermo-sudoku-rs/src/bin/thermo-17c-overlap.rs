@@ -44,8 +44,7 @@ const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
 const SCHEMA: &str = "thermo-17c-overlap-v1";
 const CHECKPOINT_SCHEMA: &str = "thermo-17c-overlap-checkpoint-v3";
-const ALGORITHM_REVISION: &str =
-    "saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2";
+const ALGORITHM_REVISION: &str = "saturated-axis-poset-antichain-hamiltonian-unified-hasse-mcv-v3";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {

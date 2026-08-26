@@ -103,14 +103,18 @@ python -m unittest discover -s analysis -p "test_*.py" -v
 python -m unittest discover -s thermo_search -p "test_*.py" -v
 ```
 
-Build the generalized scanner and reproduce the exact run:
+Build and run the current generalized scanner:
 
 ```text
 cargo build --release --manifest-path thermo-sudoku-rs/Cargo.toml --bin thermo-17c-overlap
-python analysis/run_17c_overlap_chunks.py --corpus <path-to>/17puz49158.txt --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe --output-dir <artifact-root>/17c-overlap-v2 --workers 4 --eligible-per-chunk 16
+python analysis/run_17c_overlap_chunks.py --corpus <path-to>/17puz49158.txt --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe --output-dir <artifact-root>/17c-overlap-v3 --workers 4 --eligible-per-chunk 16
 ```
 
 On non-Windows systems, omit the executable's `.exe` suffix.
+
+The retained completed `v2` run used commit
+`551db12c0924a3d7c594f489bbc971d30f8763f9`. Check out that commit before
+rebuilding if the historical `v2` implementation and identities are required.
 
 This invocation sets no task timeout or solver node limit and uses no alternate
 or fallback solver.
