@@ -1,259 +1,157 @@
-# Minimum-coverage thermo Sudoku research
+# Minimal Thermo Sudoku
 
-This workspace now contains two maintained components; the synchronized files
-under `sources/` remain read-only.
+This repository contains exact and heuristic tools for finding thermo-only
+Sudoku puzzles with the smallest possible number of covered cells. A completed
+generalized search excludes 17-cell constructions, while the current best
+construction covers 19 cells. The minimum is therefore 18 or 19 cells.
 
-**Status:** a unique 19-cell construction has been found in the 9+8+2
-partition and independently verified by several exact solvers. Its paths,
-solution, and discovery provenance are in
-[`analysis/unique-19c-9x8x2-2026-08-21.md`](analysis/unique-19c-9x8x2-2026-08-21.md).
-The search has now moved to 17-cell coverage, the absolute lower bound implied
-by the no-16-clue theorem. Exact catalogue scans now exclude `9+8` and all ten
-three-thermometer partitions, closing the complete 15- and 14-comparison
-strata. A later exact scan exhausted the merge-maximal representatives of the
-sole eight-thermometer partition. Therefore the global disjoint existence
-search need continue through only the 39 four- through seven-thermometer
-partitions; this does not separately exclude non-maximal eight-path layouts,
-which would have a unique lower-path dominator. No unique 17-cell construction
-is currently known. A saturated-network scan attacks all disjoint, overlapping,
-and branching cases together. Its first bounded production pass classified
-65,390,245 candidates as multiple and finished 25,324 of 25,370 eligible
-catalogue records; 46 deliberately deferred hard records remain outside its
-validated aggregate, so this is not yet a complete negative result. Run data
-stays under ignored `runs/` paths rather than being committed to the repository.
+## Contents
 
-- `thermo_search/thermo_anneal.py`: corrected, bounded and reproducible
-  simulated-annealing search. It can use the installed console solver for
-  cross-checks or the in-process Rust backend for normal work.
-- `thermo-sudoku-rs/`: one dependency-free Rust solver for classic Sudoku plus
-  strict thermometers. The same path engine handles disjoint paths, shared
-  cells, overlaps, branches, and explicit local comparisons, and is designed
-  first for `0 / 1 / 2+` classification.
-- `thermo-17c-morph`: exact morph/path scanner over the complete catalogue of
-  49,158 essentially different 17-clue classics.
-- `thermo-17c-three-path`: exact scanner for all ten three-thermometer
-  partitions of 17 cells.
-- `thermo-17c-maximal`: component-unlabelled merge-maximal scanner for the
-  remaining disjoint path layers.
-- `thermo-17c-overlap`: saturated-network scanner for arbitrary overlapping
-  and branching local inequalities on the 17 catalogue cells.
+- [Current results](#current-results)
+- [Puzzle model](#puzzle-model)
+- [Exact 17-cell method](#exact-17-cell-method)
+- [Reproduction](#reproduction)
+- [Repository layout](#repository-layout)
+- [Evidence and data](#evidence-and-data)
 
-The original path-based searches use this geometry:
+## Current results
 
-- zero-based row-major cells;
-- bulb-to-tip path order;
-- orthogonal or diagonal king-neighbour steps;
-- simple paths of length 2 through 9;
-- no cell shared by different thermometers;
-- diagonal segments may geometrically cross if they do not share a cell.
+| Question | Current result | Details |
+| --- | --- | --- |
+| Generalized 17-cell networks | **No** | The complete `v2` saturated-network scan classified 65,561,076 candidates as multiple, with zero unique or impossible targets. It covers disjoint, overlapping, branching, and merging comparison networks. |
+| General lower bound | **At least 18 covered cells** | The no-16-clue theorem excludes coverage of 16 or fewer cells; the completed generalized scan excludes exactly 17. |
+| 19-cell existence | **Yes** | A cell-disjoint `9+8+2` puzzle is uniquely solvable and independently verified. [Puzzle and verification](analysis/unique-19c-9x8x2-2026-08-21.md). |
+| Exact minimum | **18 or 19 cells** | The 18-cell case remains open. |
 
-The generalized 17-cell scanner deliberately replaces the no-sharing rule by
-a finite directed network of local strict comparisons. Cells may be shared,
-comparisons may branch or merge, and every edge can equivalently be drawn as a
-two-cell thermometer. Its exact scope and why one saturated network suffices
-are documented separately below.
+## Puzzle model
 
-Quick verification:
+The minimum-coverage question uses standard 9x9 Sudoku and no givens other
+than thermometer inequalities. A thermometer is a strict bulb-to-tip chain.
+Consecutive cells are orthogonal or diagonal king neighbours, paths are simple,
+and a path has length 2 through 9. Diagonal segments may cross geometrically.
+
+Coverage means the number of distinct cells in the union of all constraints.
+The project distinguishes two scopes:
+
+- **Cell-disjoint paths:** different thermometers share no cells.
+- **Generalized networks:** thermometer paths may share cells or segments, and
+  their union may branch or merge. Equivalently, the layout is any finite set of directed two-cell
+  king-neighbour inequalities. Every one of the 17 covered cells must be
+  incident to at least one inequality.
+
+The generalized scope strictly contains the cell-disjoint scope.
+
+## Exact 17-cell method
+
+Let `C` be the 17 covered cells of a hypothetical unique thermo puzzle and
+let `S` be its solution. Fixing `S` on `C` produces a unique ordinary
+17-given Sudoku: every completion of those givens automatically satisfies the
+original inequalities. It is therefore sufficient to search the complete
+catalogue of 49,158 essentially different 17-clue classics, up to Sudoku
+coordinate morphs and digit relabelling.
+
+For the generalized search, `thermo-17c-overlap` processes each eligible
+catalogue record as follows:
+
+1. Reject records in which the 17 clues do not contain all nine symbols.
+2. Enumerate the 1,296 legal row-axis maps and 1,296 legal column-axis maps.
+   Transposition is covered by exchanging the two complete axis domains.
+3. For each realizable geometry and symbol order, build the **saturated
+   network** containing every target-true king-neighbour comparison between
+   the 17 cells, directed from lower to higher rank.
+4. Require every cell to be incident. Require each consecutive rank pair to
+   have a physical edge; otherwise swapping that pair gives a second Sudoku
+   solution. The valid symbol orders are therefore Hamiltonian paths in the
+   nine-symbol adjacency graph. Global reversal/digit complement removes one
+   of each paired orientation.
+5. Keep inclusion-maximal realizable adjacency masks. For directed candidates,
+   compute transitive closure, deduplicate equal posets, and keep
+   inclusion-maximal closures. These exact dominance steps cannot discard the
+   last unique candidate because every removed network has a realizable,
+   target-preserving stronger representative.
+6. Classify each retained network with the unified Rust solver, counting only
+   to `0`, `1`, or `2+`. The known catalogue solution makes `0` an internal
+   consistency failure.
+
+The saturation reduction is the key completeness argument. If `E` is any
+admissible network and `U` is its saturated target-true superset, then
+`E ⊆ U`. Adding constraints preserves the target and cannot add solutions,
+so `E` unique implies `U` unique. Conversely, `U` is itself admissible in the
+generalized two-cell-thermometer scope. Searching one saturated network per
+realization therefore replaces enumeration of every edge subset and every
+path partition.
+
+The completed run covered all 49,158 catalogue records and all 25,370 eligible
+records in 1,586 validated chunks. Every one of the 65,561,076 retained
+candidates was multiple. The compact aggregate is
+[`analysis/17c-overlap-v2-summary-2026-08-26.json`](analysis/17c-overlap-v2-summary-2026-08-26.json).
+
+The implementation details, dominance proofs, corpus identity, and completion
+criteria are in [the generalized 17-cell method note](analysis/17c-overlap-search.md).
+The direct two- and three-path reductions are in
+[the classic-morph search note](analysis/17c-classic-morph-search.md).
+
+## Reproduction
+
+Build and verify the maintained code:
 
 ```text
-cargo test --release --manifest-path thermo-sudoku-rs/Cargo.toml
-python -m unittest analysis.test_run_17c_overlap_chunks -v
+cargo fmt --all --manifest-path thermo-sudoku-rs/Cargo.toml -- --check
+cargo test --release --all-targets --manifest-path thermo-sudoku-rs/Cargo.toml
+cargo clippy --all-targets --all-features --manifest-path thermo-sudoku-rs/Cargo.toml -- -D warnings
+python -m unittest discover -s analysis -p "test_*.py" -v
 python -m unittest discover -s thermo_search -p "test_*.py" -v
-python thermo_search/thermo_anneal.py validate-corpus \
-  --input sources/min_thermos_9_8_2.txt
 ```
 
-The last command intentionally exits nonzero for the supplied file because it
-detects the overlapping record on line 1192; its summary should still show
-`matched: 1279` and `mismatched: 0`.
+Build the generalized scanner and reproduce the exact run:
 
-The Rust implementation is specialized and auditable: 9-bit candidate domains,
-an event-driven propagation queue, bit-parallel house checks, thermo-aware
-branch ordering, and exact forward/backward propagation along each increasing
-path. It also has an exact hybrid batch screen that fixes a base layout once,
-shares solution witnesses among all legal two-cell extensions, and finishes
-only the unresolved extensions independently.
+```text
+cargo build --release --manifest-path thermo-sudoku-rs/Cargo.toml --bin thermo-17c-overlap
+python analysis/run_17c_overlap_chunks.py --corpus <path-to>/17puz49158.txt --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe --output-dir <artifact-root>/17c-overlap-v2 --workers 4 --eligible-per-chunk 16
+```
 
-The supplied corpus currently gives 1,279 exact count matches and one geometry
-rejection: line 1192 shares cell 60 between two thermometers. No source record
-is modified.
+On non-Windows systems, omit the executable's `.exe` suffix.
 
-## Exact 17-cell classic-morph search
+This invocation sets no task timeout or solver node limit and uses no alternate
+or fallback solver.
 
-Any unique thermo puzzle covering 17 cells induces a unique ordinary Sudoku
-when those same 17 cells are fixed to their values in the solution. Therefore
-the complete 49,158-classic catalogue is a complete starting universe, up to
-Sudoku morphs and digit relabelling. The same reduction plus the no-16-clue
-theorem proves that no thermo-only construction can cover fewer than 17 cells.
+Use the same command to resume. The runner binds an output directory to the
+corpus, executable, chunk size, and algorithm revision; validates every chunk
+before publication; and refuses mixed or overlapping evidence. Worker count
+may be changed between invocations. Run artifacts are intentionally ignored by
+Git.
 
-The first exact stage is `9+8`, the only two-path partition and the strongest
-17-cell layout with 15 comparisons. Only 10 catalogue records have the
-necessary digit multiplicities `2,2,2,2,2,2,2,2,1`. The new symbolic scanner
-folds digit relabelling into the path order and represents all 1,296 row and
-1,296 column morphs with support bitsets. Its complete scan found **zero
-spatially realizable `9+8` path pairs**. Thus that stratum is closed without a
-Sudoku count.
+## Repository layout
 
-The three-path scanner then searched all ten partitions with 14 comparisons.
-It folds digit relabelling into one global source-symbol order, injects each
-symbol's occurrences into the three path roles, requires consecutive ranks to
-share a path (otherwise swapping them gives a second solution), and intersects
-the same row/column morph-support bitsets after every edge. Across the complete
-catalogue it found 337 distinct spatial survivors. Every one was classified as
-multiple, with two explicit solution grids retained. Therefore the complete
-two- and three-thermometer strata are excluded.
+| Path | Purpose |
+| --- | --- |
+| [`thermo-sudoku-rs/`](thermo-sudoku-rs/) | Unified exact Rust solver and research binaries. |
+| [`analysis/`](analysis/) | Mathematical reductions, run specifications, verifiers, and retained evidence. |
+| [`thermo_search/`](thermo_search/) | Seeded Python search and corpus checking. |
+| [`benchmarks/`](benchmarks/) | Reproducible solver comparisons. |
+| [`sources/`](sources/) | Read-only synchronized reference material. |
 
-The two-/three-path result alone left 40 disjoint partitions. A later exact
-scan classified all 151,631 merge-maximal eight-path occurrences as multiple.
-Any unique non-maximal eight-path layout could be extended to a unique
-lower-path dominator, so the global existence search now needs only the 39
-partitions with four to seven thermometers: 16 with 13 comparisons, 13 with
-12, seven with 11, and three with 10. This is a cumulative reduction, not a
-standalone exclusion of every eight-path layout. The first direct attempt at
-those lower layers was stopped after ten partial shards because of extreme
-record-level runtime variation; the completed shards were preserved, and
-exact early pruning plus dynamic small-chunk scheduling improved a matched
-pilot by 23.2%.
+## Evidence and data
 
-For the broader scope in which thermometers may overlap or branch, a stronger
-exact reduction subsumes all 40 post-three-path partitions at once, including
-non-maximal eight-path layouts. For each catalogue morph and digit order,
-`thermo-17c-overlap` includes every target-true local comparison among the 17
-cells. Any smaller overlapping network is a subset of this saturated network,
-so a unique smaller network would imply that the saturated one is unique too.
-The first four-worker catalogue pass began on 2026-08-23; early timing pilots
-missed a sparse DFS heavy tail. The bounded scheduler ultimately completed
-25,324 of 25,370 eligible records and durably deferred 46 singleton records
-after five minutes each. All 65,390,245 completed classifications were
-multiple, but deferred work never counts as evidence, so the scan remains
-incomplete.
+The required combined catalogue is `17puz49158.txt`:
 
-Profiling showed that candidate generation was cheap and that the old fixed
-low-digit-first DFS could enter enormous dead subtrees in just one geometric
-morph. The Rust code now has one overlap-capable solver with dynamic
-MRV/constraint-pressure cell selection and most-constraining-first value order;
-there is no timeout or alternate solver in the exact search. This is a new
-algorithm revision and must not be mixed with the earlier run identity. The
-launcher can still split slow parent chunks into exact one-record children and
-defer operational stragglers without counting them. An exact unbounded
-diagnostic replay classified all 170,831 candidates from the 46 deferred records
-as multiple in 158.8 seconds, but a fresh complete `v2` aggregate is still
-required. See
-[`analysis/17c-overlap-search.md`](analysis/17c-overlap-search.md).
+```text
+records   49,158
+bytes     4,080,114
+SHA-256   58ef7d83e8cbac32495161f9745877fef82f5e8b3fe58e3cad4eb3fc004a81b9
+```
 
-The reduction, corpus hashes, exact algorithm, deterministic result, and scope
-boundary are in
-[`analysis/17c-classic-morph-search.md`](analysis/17c-classic-morph-search.md).
+Download and licence provenance are recorded in
+[the catalogue note](analysis/17c-classic-morph-search.md#input-corpus).
+The file is not vendored. The original 49,151-record Royle collection was
+published under CC BY 2.5; the combined archive does not explicitly restate a
+licence for its seven later additions.
 
-## Exact 9+8+2 pilot
-
-The first symmetry-reduced native shard classified 99,389,208 directed
-two-cell extensions across 257,776 canonical 9+8 bases. It found no unique
-19-cell puzzle in that shard. The exact result, reproduction command, and scope
-are recorded in `analysis/9x8-pilot.md`. Batch witness output can be checked
-without trusting the solver by `analysis/verify_two_cell_certificate.py`.
-
-The measured scale also confirms that direct base-by-base enumeration is not a
-credible hobby-resource route to a global exclusion. This motivated the
-trade-cut CEGIS and symbolic master for the relaxed sixteen-comparison problem
-described below. A negative result for that relaxation would exclude every
-disjoint thermometer layout covering at most 19 cells, regardless of its
-length partition.
-
-## Guided exact 9+8+2 portfolio
-
-The `thermo-9x8-guided` binary now uses every valid layout in the low-solution
-corpus as a verified starting point for a deterministic, elitist gradient
-search.  A move changes one cell of the length-nine or length-eight path; the
-specialized solver then scores every legal two-cell thermometer for that base
-together.  Counts are refined through a common cap ladder, so differently
-censored results are never compared as exact values.  Symmetry-equivalent full
-layouts and bases are deduplicated, while a fixed anchor schedule ensures that
-high-count corpus entries cannot be starved by the current elite beam.
-
-This heuristic is paired with, but deliberately separated from, the proof
-search.  It can export only fully enumerated Sudoku solution pairs as standard
-global CEGIS cuts; the topology tool can merge those cuts into any validated
-checkpoint.  Gradient scores themselves never prune anything.  The topology
-master also has an opt-in `exact-9+8+2` scope, so continued SAT/CEGIS search is
-deterministic and exhaustive for that partition even if the local search gets
-stuck.  The design, commands, and bounded pilot results are in
-`analysis/9x8-guided-hybrid.md`.
-
-The first clean one-cell guided run evaluated 8,136 bases and found a
-four-solution mutation. Its frontier then exhausted at 8,188 evaluations.
-A fresh run with the opt-in two-cell reroutes escaped that neighborhood and
-found a unique 19-cell 9+8+2 construction at evaluation 15,251 after about
-32 minutes. The construction and its independent Rust, ISS, native Rangsk,
-and standalone-DFS verification are recorded in
-`analysis/unique-19c-9x8x2-2026-08-21.md`.
-
-Separately, the first 100 exact-master candidates all still had at least 65
-solutions. That negative-lane run remains only a bounded diagnostic, not an
-exclusion.
-
-## Fixed-target symbolic pilot
-
-The `thermo-fixed-target` binary implements the first relaxed trade-cut CEGIS
-stage for one chosen solved grid. It alternates a hitting-set master with an
-exact classic-Sudoku oracle over arbitrary, possibly overlapping
-king-neighbour comparisons. Its restartable pilot reached 2,983,306 explicit
-alternative grids. A structural adjacent-digit-swap argument now certifies a
-fixed-target lower bound of eight; the saved alternatives plus those seeds
-still admit an 11-comparison hitting set. It therefore makes no fixed-target or
-global exclusion claim. The precise scope, checkpoint hash, and next
-target-free step are recorded in `analysis/fixed-target-pilot.md`.
-
-## Target-free relaxed-16 pilot
-
-The `thermo-global-cegis` binary implements the target-free relaxation: an
-unknown Sudoku witness, 544 possible directed king-neighbour comparisons, a
-joint exact hitting-set/Sudoku master, and an exact batched second-solution
-checker. Its persisted pilot corpus contains 578,392 independently validated
-solution pairs. That bounded pilot found no unique 16-comparison set and did
-not exhaust its master. The later guided 9+8+2 construction is itself a unique
-16-comparison witness, so existence is now settled positively even though the
-master's exhaustive negative lane remains unfinished. The formulation,
-commands, hashes, checkpoints, and present scaling boundary are recorded in
-`analysis/global-cegis-pilot.md` and `analysis/target-free-cegis-design.md`.
-
-## Non-overlapping topology SAT pilot
-
-The `thermo-topology-cnf` binary turns the pair checkpoint into a deterministic
-SAT master for the actual geometry: a cell-disjoint union of directed paths
-covering at most 19 cells. It validates and decodes SAT models, calls the exact
-Rust thermo oracle, and appends one checkable solution-pair cut for every
-multiple candidate. Its persistent CaDiCaL mode instead learns batched
-all-pair or anchor-pair cuts without restarting the SAT solver. The first
-thirteen full-scale candidates were all multiple. Ten completed
-1,000-iteration lazy runs, plus 556 additional validated refinement batches,
-have now grown the corpus to 22,846,872 solution pairs and 20,872,205 unique
-cuts. Every completed segment stopped at its configured iteration limit
-without finding a unique candidate or reaching UNSAT. That exhaustive lane
-remains unexhausted; the existence question was subsequently resolved
-positively by the guided 9+8+2 construction above. The
-encoding, full-scale run, hashes, and proof-verification path are recorded in
-`analysis/topology-sat-pilot.md`.
-
-Tdoku remains a useful architecture reference, but its public pencilmark
-interface only accepts unary cell restrictions and cannot express a
-thermometer's binary ordering constraints. This project therefore does not call
-Tdoku and filter its solutions. No Tdoku source code has been copied here.
-
-The primary reproducible comparison with Rangsk's native Release solver is in
-[`benchmarks/NATIVE_RANGSK.md`](benchmarks/NATIVE_RANGSK.md), with complete raw
-per-case samples alongside it. The older console and WebAssembly measurements
-remain linked from [`benchmarks/README.md`](benchmarks/README.md).
-
-## Source notes and acknowledgement
-
-The notebook under `sources/` is preserved as historical exploratory material.
-Its saved code contains stale anti-knight and API residue and should not be used
-as the maintained classic-Sudoku search implementation. The accompanying
-result corpus is classic Sudoku plus thermometers and is independently checked
-by the Rust solver.
-
-The earlier 20-cell positive-control and regression fixture is by **Blue** and
-is included for research and demonstration with the creator's permission. The
-new independently verified 19-cell construction is also retained as a solver
-regression fixture.
+The completed aggregate reports all 49,158 source records, all 25,370 eligible
+records, and all 1,586 logical chunks with no deferred task, gap, overlap,
+identity mismatch, zero classification, or unique classification. Its detailed
+artifact-set SHA-256 is
+`312b76f3f41112042f6918447abbd08bd1c2f52a6426cc814e02d6d8c04e554f`.
+This is a deterministic exhaustive-program result, not a SAT/LRAT
+nonexistence certificate. The production scan does not retain a witness pair
+for every ordinary multiple classification.

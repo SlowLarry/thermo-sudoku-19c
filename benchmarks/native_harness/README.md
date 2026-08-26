@@ -1,4 +1,4 @@
-# Native timing harness for Rangsk's `wasm-prototype`
+# Native CLR timing harness for Rangsk's solver
 
 This small .NET program benchmarks the native CLR build of
 `dclamage/SudokuSolver`. The Python driver builds it against a specified
@@ -13,10 +13,10 @@ actual GC mode rather than inferring it from the project setting.
 The primary measurement is a fresh
 `SolverFactory.CreateBlank(9, constraints)` followed by
 `CountSolutions(maxSolutions: 2, multiThread: false)`. Every measured proposal
-therefore constructs and finalizes its own thermo geometry, as the 19-cell
-search must. Construction and counting also have separate timestamps. The
+therefore constructs and finalizes its own thermo geometry. Construction and
+counting also have separate timestamps. The
 count-only number is a diagnostic decomposition, not the primary comparison:
-an annealing proposal cannot reuse a solver built for a different layout.
+a proposal with changed path geometry cannot reuse the previous solver.
 
 The harness deliberately does not force garbage collection. It warms the full
 corpus, then measures it round-robin so that natural JIT, GC, and temperature
@@ -27,9 +27,7 @@ Run through `benchmarks/quick_compare_native_rangsk.py`; do not invoke this
 project directly unless supplying an absolute upstream project reference:
 
 ```text
-dotnet build -c Release \
-  -p:SudokuSolverProject=C:/path/to/SudokuSolver/SudokuSolver/SudokuSolver.csproj \
-  benchmarks/native_harness/NativeThermoBench.csproj
+dotnet build -c Release -p:SudokuSolverProject=C:/path/to/SudokuSolver/SudokuSolver/SudokuSolver.csproj benchmarks/native_harness/NativeThermoBench.csproj
 ```
 
 The driver refuses tracked changes in the upstream checkout and untracked files
