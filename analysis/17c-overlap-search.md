@@ -1,506 +1,271 @@
-# Exact 17-cell search with overlapping and branching thermometers
+# Exact generalized 17-cell thermo search
 
-This note describes the broader search introduced after the disjoint
-four-through-seven-path enumeration developed a severe record-level heavy
-tail. It gives the mathematical reduction, implementation contract, exact run
-identity, and the checks required before a result can be claimed. The first
-bounded catalogue pass ended with 46 of 25,370 eligible records deliberately
-deferred. A successor solver revision removes the identified DFS pathology, but
-no fresh complete production aggregate exists yet, so no complete negative
-result is claimed here.
+This note specifies the exhaustive search implemented by
+`thermo-sudoku-rs/src/bin/thermo-17c-overlap.rs`, its completeness reduction,
+the completed production result, and the evidence needed to reproduce it.
+
+## Contents
+
+- [Result](#result)
+- [Scope](#scope)
+- [Completeness reduction](#completeness-reduction)
+- [Catalogue and eligibility](#catalogue-and-eligibility)
+- [Exact enumeration](#exact-enumeration)
+- [Sudoku classification](#sudoku-classification)
+- [Production identity and command](#production-identity-and-command)
+- [Audit and evidence boundary](#audit-and-evidence-boundary)
+
+## Result
+
+The complete generalized 17-cell scan found **no unique puzzle**. All
+65,561,076 retained candidates had at least two Sudoku solutions.
+
+This excludes every thermo-only standard 9x9 Sudoku in the [scope below](#scope)
+whose constraints cover exactly 17 distinct cells. The scope includes ordinary
+cell-disjoint thermometers as well as overlapping paths, shared cells, branches,
+merges, and arbitrary collections of local two-cell thermometers.
+
+Together with the no-16-clue theorem, the result proves that such a puzzle must
+cover at least 18 cells. A verified 19-cell construction exists, so the minimum
+is **18 or 19 cells**. The 18-cell case remains open.
+
+The retained aggregate is
+[`17c-overlap-v2-summary-2026-08-26.json`](17c-overlap-v2-summary-2026-08-26.json).
+Its frozen runner identity is
+[`17c-overlap-v2-run-identity-2026-08-25.json`](17c-overlap-v2-run-identity-2026-08-25.json).
 
 ## Scope
 
-The base puzzle is standard 9x9 Sudoku with no givens. The generalized thermo
-object is a finite set of strict comparisons `cell A < cell B`, where the
-cells are orthogonal or diagonal king neighbours. Exactly 17 distinct cells
-must be incident to at least one comparison; “17 cells” always means the size
-of this union, not the sum of path lengths with repeats. Comparisons may share
-cells, branch, merge, form diamonds, and geometrically cross. Equivalently,
-each comparison may be drawn as a two-cell thermometer, with no
-drawing-imposed count limit. Duplicate edges are redundant, and 17 grid cells
-induce at most 46 distinct king edges. Longer overlapping thermometers add no
-further semantics because they flatten to their adjacent strict comparisons.
+The searched puzzle model is:
 
-This is deliberately more permissive than a drawing convention that allows
-only rooted trees, bounds the number or degree of branches, or forbids
-crossings. A negative result in the permissive scope excludes all those
-subclasses. A positive saturated network might need to be minimized before it
-has a conventional or attractive thermometer drawing.
+- standard 9x9 Sudoku;
+- no givens other than thermometer inequalities;
+- exactly 17 distinct covered cells;
+- every covered cell incident to at least one comparison;
+- each comparison joins orthogonally or diagonally adjacent cell centres;
+- strict bulb-to-tip increase;
+- arbitrary sharing, overlap, branching, merging, and geometric crossing;
+- no drawing-imposed limit on the number of distinct comparisons.
 
-## Saturation theorem
+Equivalently, a layout is any finite directed set of target-consistent
+king-neighbour inequalities on 17 cells. Duplicate comparisons have no effect.
+Any conventional thermometer path is the conjunction of its consecutive
+two-cell inequalities, so the model contains every collection of ordinary
+thermometers, including the cell-disjoint case. There are at most 46 distinct
+undirected king edges induced by any 17 grid cells.
 
-Let `C` be the 17 covered cells of a hypothetical unique inequality-only
-puzzle, and let `S` be its solution. Fixing the digits of `S` on `C` gives a
-unique ordinary 17-clue Sudoku: any completion of those givens automatically
-satisfies every comparison in the original puzzle. Consequently the complete
-49,158-entry catalogue of essentially different 17-clue classics is a
-complete source universe, up to Sudoku coordinate morphs and digit relabelling.
+The result does not cover nonstandard Sudoku regions, inequalities between
+non-neighbouring cells, thermometers using cells outside the 17-cell union, or
+puzzles with additional givens or other constraint types.
 
-For one catalogue record, one Sudoku coordinate morph, and one global digit
-relabeling, define `U` to contain **every** king-neighbour comparison between
-covered cells that is true in the relabeled target solution, directed from the
-lower digit to the higher digit. Equal target digits contribute no comparison.
+## Completeness reduction
 
-Every overlapping or branching comparison network `E` on those cells is a
-subset of `U`. Adding target-true comparisons cannot remove the target and
-cannot add solutions, so
+### From a thermo puzzle to a 17-given classic
 
-```text
-E is unique  =>  U is unique.
-```
+Let `C` be the covered cells of a hypothetical unique thermo puzzle and `S`
+its solution. Fixing the values of `S` on `C` gives an ordinary 17-given
+Sudoku. Any completion of those givens has the same values on every comparison
+endpoint and therefore satisfies every thermo inequality. The 17-given Sudoku
+must consequently be unique.
 
-Coverage is also preserved: every cell incident in `E` remains incident in
-the superset `U`. Conversely, in the permissive scope `U` itself is a valid
-collection of overlapping two-cell thermometers. Therefore a unique
-generalized 17-cell network exists **if and only if** at least one saturated
-`U` is unique. There is no need to enumerate its exponentially many edge
-subsets or any of the disjoint path partitions. This equivalence is
-the reason the generalized scan can be smaller than the disjoint search even
-though its object class is strictly larger.
+It is therefore sufficient to search a complete catalogue of essentially
+different unique 17-given classic Sudokus, together with every Sudoku
+coordinate morph and every digit relabelling.
 
-All nine clue digits must occur. If one or more ranks were absent, some
-absent/present boundary in the ordered ranks would contain consecutive values;
-swapping that pair would preserve every comparison and give a second Sudoku
-solution. More generally, the comparison poset must have the chosen
-target order as its unique linear extension. Every consecutive pair of ranks
-must therefore be comparable. Because no rank lies strictly between them,
-that comparability cannot be supplied through a longer directed chain: it
-must be one physical comparison. Thus the target order must be a Hamiltonian
-path in the nine-symbol physical-adjacency graph. This condition is necessary,
-not an approximation; candidates passing it still receive an exact Sudoku
-classification.
+### Saturating the local comparisons
 
-## Exact scanner
+Fix one catalogue target, one 17-cell realization, and one digit order. Let
+`U` contain every target-true king-neighbour comparison among the 17 cells,
+oriented from the lower target digit to the higher target digit.
 
-`thermo-17c-overlap` performs the following deterministic search.
-
-1. Reject catalogue records that omit a digit.
-2. Generate the 1,296 legal row-axis and 1,296 legal column-axis morphs.
-3. Represent the clue-pair king adjacencies as compact masks. Keep only
-   inclusion-maximal row masks, column masks, and combined physical networks;
-   every discarded mask has a realizable stronger representative.
-4. Reject networks that do not incidentally cover all 17 clue cells.
-5. Enumerate Hamiltonian symbol orders, retaining one of the two global
-   reversal/digit-complement directions.
-6. Saturate and orient the comparisons, compute their transitive closures,
-   deduplicate equal posets, and retain only inclusion-maximal closures.
-7. Ask the unified exact Sudoku/thermometer solver for a capped `0 / 1 / 2+`
-   classification. The known catalogue target makes the zero case an internal
-   consistency failure.
-
-The 1,296 axis maps are the `6^4` combinations of band permutation and the
-three within-band row permutations; columns use the identical group. A full
-Sudoku coordinate morph is one row map, one column map, and optionally a
-transpose. Transpose need not be enumerated for existence because exchanging
-the independently complete row and column domains realizes the transposed
-case. Digit relabeling is represented by the Hamiltonian symbol order rather
-than by a separate `9!` loop. Simultaneously reversing that order and every
-comparison is global digit complement, so retaining one direction removes an
-exact fixed-point-free symmetry.
-
-There is now one solver implementation for both ordinary thermometer paths and
-overlapping comparison networks. It uses 9-bit domains, the ordinary Sudoku
-singleton and house queues, one `u64` incident-path mask per cell, and one
-`u64` dirty-path frontier. A domain change schedules every incident path. Each
-path is revised by a forward lower-bound sweep followed by a backward
-upper-bound sweep; this is generalized arc consistency for a strictly
-increasing chain, even when domains have holes. Changes at shared cells requeue
-every other incident path, so branches, merges, and diamonds reach a common
-fixpoint. A restriction also dirties the cell's three Sudoku houses and queues
-a newly singleton cell; house revision includes hidden singles and locked
-candidates in addition to peer elimination.
-
-The scanner calls `Solver::blank_comparisons`. Exact duplicate directed edges
-are removed and every remaining `(A, B)` is represented as the two-cell path
-`A < B`; no second solver or delegation layer exists. The path representation
-accepts 64 constraints. Any 17 grid cells induce at most 46 undirected king
-edges, so the saturated search has exact headroom and no comparison is
-truncated. Arc consistency alone is not claimed to decide an arbitrary network;
-exhaustive DFS supplies completeness. The same API also accepts overlapping
-long paths directly.
-
-DFS first minimizes domain size. Among tied cells it maximizes the number of
-still-unresolved Sudoku peers plus still-unresolved comparison neighbours. For
-the chosen cell, candidate values are scored by the immediate domain removals
-they cause in Sudoku peers and inequality neighbours and tried in descending
-score order, with a deterministic low-digit tie. This dynamic
-constraint-pressure/most-constraining-value rule replaces the former static
-thermometer degree and fixed low-digit-first value order. It changes only the
-order of an exhaustive search, not its solution set.
-
-The exact dominance steps are monotone. Masks and closures are compared on the
-fixed 17 clue-vertex labels. If adjacency mask `A` is contained in a realizable
-mask `B`, transport the weaker puzzle through the Sudoku coordinate morph
-between their representatives; saturating `B` only adds target-true
-constraints. Likewise, if directed closure `A` is contained in directed
-closure `B`, every solution of `B` satisfies `A`, even when their stored
-representatives arose from different target orders. In both cases the stronger
-candidate retains its known target and has a nonempty subset of the weaker
-candidate's solutions. Therefore a unique discarded case always has a
-realizable retained unique dominator. Transitive closure is used only for
-logical equality and dominance; the solver receives the realized local king
-edges, never nonlocal closure arcs. Candidate equality and dominance use
-complete masks and closures, not hash equality. FNV and SHA values are used
-only for artifact, checkpoint and run identity checks.
-
-## Persistence and parallel execution
-
-`analysis/run_17c_overlap_chunks.py` divides the 25,370 all-nine-digit records
-into small contiguous ranges and assigns them dynamically to independent
-single-threaded scanner processes. A chunk is published only after its JSONL
-header and terminal accounting validate. The run identity binds the output
-directory to the exact corpus and executable hashes. Re-running the command
-skips validated chunks; a unique case stops new scheduling and terminates the
-other workers.
-
-The launcher holds an OS advisory lock for its complete invocation, so two
-launchers cannot mix artifacts in one output directory. Each worker writes a
-uniquely named `.partial` file. The parent checks its schema, algorithm
-revision, corpus fingerprint, exact line range, cap-two accounting and terminal
-completion flags before replacing the final chunk path. Interrupted partials
-are never counted. There is intentionally no durable checkpoint inside one
-launcher task: stopping preserves every published artifact but recomputes its
-unfinished task.
-
-The launcher can permanently replace an unfinished parent chunk with a
-deterministic split manifest. Its children each contain one eligible catalogue
-record and together form an exact, gap-free and overlap-free partition of the
-parent's inclusive source-line interval. Every manifest is bound to the corpus
-hash, executable hash and algorithm revision. A logical root is satisfied by
-exactly one evidence representation: either its original parent artifact or
-all of its validated children, never both. Orphan children, inconsistent
-revisions, parent/child ambiguity, and manifests whose declared child ranges
-are incomplete or overlapping are hard errors. Missing child artifacts remain
-pending work. Published split manifests are discovered automatically on
-later resumes, and separate artifact-set and manifest-set hashes make the
-selected evidence reproducible. `--split-workers` limits the split lane so a
-pathological child cannot consume every worker while ordinary chunks remain.
-
-The bounded scheduler adds two distinct timeout outcomes. A multi-record parent
-that exceeds `--parent-timeout-seconds` is terminated individually, reaped, and
-atomically replaced by its deterministic split manifest; its singleton
-children then enter the split queue. A child exceeding
-`--singleton-timeout-seconds` is not classified. Instead, its exact parent,
-part, source range, sole eligible line, attempt count, timeout and partial-file
-metadata are written atomically to identity-bound `deferred-tasks.json`. Other
-workers continue. Normal resumes skip deferred children; only an explicit
-`--retry-deferred` pass retries them.
-
-A timeout always means unresolved, never multiple, unique, or exhausted. Only a
-fully validated terminal JSONL contributes counts. If a valid final artifact
-wins the deadline race it supersedes the timeout; a later successful retry
-similarly removes its stale deferred entry. Partials are never evidence. The
-aggregate remains `complete:false` while any deferred singleton exists and
-records the deferred-manifest hash and exact line list.
+Every admissible comparison network `E` on that realization satisfies
+`E ⊆ U`. Adding the comparisons in `U \ E` preserves the target and can only
+remove solutions. Thus:
 
 ```text
-python analysis/run_17c_overlap_chunks.py \
-  --corpus <path-to>/17puz49158.txt \
-  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
-  --output-dir <artifact-root>/overlap-exact \
-  --workers 4 --eligible-per-chunk 16
+E unique  =>  U unique
 ```
 
-The audited intervention in the production run used:
+Conversely, `U` is itself admissible as a collection of two-cell
+thermometers. Existence of any unique generalized network is therefore
+equivalent to existence of a unique saturated network. The scanner need not
+enumerate edge subsets, thermometer decompositions, or path-length partitions.
+
+### Necessary digit order
+
+All nine digits must occur on the covered cells. If a digit were absent,
+swapping it with a neighbouring rank across an absent/present boundary would
+preserve every comparison and produce a second Sudoku solution.
+
+The comparison poset must also have a unique linear extension. In particular,
+each consecutive pair in the target digit order must share a physical
+comparison edge. No longer directed chain can order consecutive ranks because
+there is no intermediate rank. Hence every admissible target order is a
+Hamiltonian path in the nine-symbol physical-adjacency graph.
+
+These are necessary reductions only. Every survivor is still classified by
+an exact Sudoku search.
+
+## Catalogue and eligibility
+
+The input is the combined catalogue `17puz49158.txt`:
 
 ```text
-python analysis/run_17c_overlap_chunks.py \
-  --corpus <path-to>/17puz49158.txt \
-  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
-  --output-dir <artifact-root>/overlap-exact \
-  --workers 4 --eligible-per-chunk 16 \
-  --split-chunk 34 --split-chunk 515 \
-  --split-chunk 598 --split-chunk 675 --split-workers 1
+records   49,158
+bytes     4,080,114
+SHA-256   58ef7d83e8cbac32495161f9745877fef82f5e8b3fe58e3cad4eb3fc004a81b9
+FNV-1a64  96baf249978384bb
 ```
 
-The repeated `--split-chunk` options are needed only to commit new manifests;
-normal resumes auto-adopt existing ones. This implementation subdivides at
-record boundaries. A pathological single record, and an individual
-`count_up_to(2)` call within it, remain atomic and may require a later
-candidate-level or solver-frontier split.
+Download and licence provenance are recorded in
+[`17c-classic-morph-search.md`](17c-classic-morph-search.md#input-corpus).
+The catalogue is not vendored.
 
-After a second all-worker stall, the final bounded `v1` production restart used:
+Exactly 25,370 records contain all nine clue symbols and enter geometric
+enumeration. The other 23,788 records are excluded by the absent-digit swap
+argument above.
 
-```text
-python analysis/run_17c_overlap_chunks.py \
-  --corpus <path-to>/17puz49158.txt \
-  --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe \
-  --output-dir <artifact-root>/overlap-exact \
-  --workers 4 --eligible-per-chunk 16 --split-workers 1 \
-  --split-chunk 676 --split-chunk 766 --split-chunk 767 \
-  --parent-timeout-seconds 1800 --singleton-timeout-seconds 300
-```
+## Exact enumeration
 
-The four older split manifests are adopted automatically. The three new flags
-avoid repeating already-observed multi-hour parent work. One split lane and
-three ordinary lanes preserve catalogue throughput. The main pass deliberately
-omits `--retry-deferred`; hard records are a separately auditable backlog.
+For each eligible catalogue record the scanner performs these steps.
 
-The scanner also has an in-process checkpoint for bounded diagnostics. It
-writes a synced same-directory temporary and installs it with a validated
-backup fallback, binding the state to the flushed JSONL byte prefix. A resume
-therefore rejects or truncates an unrelated or partial tail.
-The chunk runner deliberately avoids frequent checkpoints: on a small exact
-record, syncing every 32 candidates was measured at about 6.8 times the
-checkpoint-free runtime.
+1. Generate all 1,296 legal row-axis morphs and all 1,296 legal column-axis
+   morphs. Each axis group has `6^4` elements: one band or stack permutation
+   and three within-band or within-stack permutations.
+2. Precompute which morphs make each of the 136 clue-cell pairs king-adjacent.
+   Row and column supports are intersected as bitsets.
+3. Group equal axis masks and retain inclusion-maximal masks. Intersect the
+   retained row and column classes, group equal physical networks, and again
+   retain inclusion-maximal masks.
+4. Reject networks that do not make every one of the 17 cells incident.
+5. Build the nine-symbol adjacency graph and enumerate its Hamiltonian orders.
+   Simultaneous order reversal and comparison reversal is global digit
+   complement, so one of each pair is retained.
+6. Orient every target-true local edge for each order and compute the directed
+   transitive closure on the 17 labelled clue vertices.
+7. Deduplicate equal closures and retain inclusion-maximal closures.
+8. Realize the representative's actual king-neighbour edges and classify the
+   resulting comparison Sudoku to a cap of two solutions.
 
-## Reproduction and frozen `v1` run identity
+Transpose is complete without an additional factor of two: exchanging the
+independently complete row and column domains realizes every transposed case.
 
-This section freezes the implementation and artifacts of the incomplete `v1`
-production pass. The successor solver below deliberately has different source,
-binary, and algorithm identities; its output cannot be appended to this run.
+The mask and closure reductions are exact monotonicity reductions. If a
+weaker representative `A` is contained in a realizable stronger
+representative `B`, transport `A` through the corresponding Sudoku coordinate
+morph to `B`'s realization. Every solution of `B` then satisfies `A`, while
+the catalogue target satisfies both. A unique `A` would force a unique `B`,
+so deleting `A` cannot delete the last unique case. Comparisons are made on
+the full labelled masks and closures, not on hash equality.
 
-The catalogue is not vendored because the combined 49,158 archive does not
-restate a licence for its seven post-Royle additions. Download
-`17puz49158.txt` through the provenance link in
-`17c-classic-morph-search.md`, then verify its identity before running:
+Transitive closure is used only as a logical-equivalence and dominance key.
+Nonlocal closure arcs are never passed to the solver; it receives only the
+representative's realized king-neighbour comparisons.
 
-| Input or implementation | Bytes | SHA-256 |
-|---|---:|---|
-| `17puz49158.txt` | 4,080,114 | `58EF7D83E8CBAC32495161F9745877FEF82F5E8B3FE58E3CAD4EB3FC004A81B9` |
-| `thermo-sudoku-rs/Cargo.toml` | 354 | `F6C1E3721F4DB01E7FD1FB9E6FB4A8F58DEC86B2AAC62180DBFBC328CD4204A0` |
-| `src/comparison.rs` | 48,618 | `75D7F7D1604FC718C8647136E013E9F375A24E7A6F5757EAD59D85B287B27981` |
-| `src/lib.rs` | 92,036 | `599A8C4E14B4F856F9891AF894368E764A20CDF8E39849751C2B6F8ECDDA75C8` |
-| `src/bin/thermo-17c-overlap.rs` | 121,659 | `17769B0068DBB01F0D0EC59AD40C4B5605E250113ED4914C7626369DE7C3F066` |
-| `analysis/run_17c_overlap_chunks.py` | 66,457 | `CC65595F253BEF0185757303A8009E4ACD98EE319866C3150C70AF6173C24626` |
-| run's `thermo-17c-overlap.exe` | 408,576 | `117DC22FCBD0914AED6D9A8D88C9964D5A403A9FB1CCE0F64C93346D2F17B658` |
+## Sudoku classification
 
-The executable was built in release mode on
-`rustc 1.94.0 (4a4ef493e 2026-03-02)`, target
-`x86_64-pc-windows-msvc`, with Cargo 1.94.0. A rebuild on another toolchain
-need not reproduce the executable hash; the source hashes and tests define the
-auditable implementation, while `run-identity.json` binds one artifact set to
-the exact executable that produced it.
+`Solver::blank_comparisons` uses the same solver as ordinary thermometer
+paths. Explicit comparisons become two-cell paths; shared endpoints and longer
+overlapping paths are handled by one incident-path work queue.
 
-Before the long run, the following checks passed:
+Each cell has a nine-bit domain. Propagation alternates:
 
-```text
-cargo build --release --manifest-path thermo-sudoku-rs/Cargo.toml \
-  --bin thermo-17c-overlap
-cargo test --release --all-targets \
-  --manifest-path thermo-sudoku-rs/Cargo.toml
-cargo clippy --release --all-targets --all-features \
-  --manifest-path thermo-sudoku-rs/Cargo.toml -- -D warnings
-cargo fmt --all --manifest-path thermo-sudoku-rs/Cargo.toml -- --check
-python -m unittest analysis.test_run_17c_overlap_chunks -v
-```
+- singleton peer elimination;
+- row, column, and box revision, including hidden singles and locked
+  candidates;
+- forward lower-bound and backward upper-bound revision of every dirty
+  increasing path.
 
-The comparison tests exhaust all `512 × 512` pairs of nine-bit endpoint
-domains and cover branches, diamonds, cycles, dense 17-cell graphs, disjoint
-fast-path parity, and randomized exact solution-set comparisons. Scanner tests
-brute-check mask dominance, Hamiltonian orders, closure antichains, morph
-realization, resume equivalence, path-alias rejection, and checkpoint/output
-safety. Runner tests cover identity binding, artifact accounting, the exclusive
-output-directory lock, deterministic child covers, manifest
-binding, parent-versus-children exclusivity, restart behavior, safe bootstrap
-failure, stable child-failure reporting, and aggregate accounting over logical
-roots. Timeout tests cover process-local cancellation, parent auto-split,
-durable singleton deferral and retry, exact ledger validation, deadline-final
-and unique-result races, stale-entry reconciliation, and total-start budgets.
-The full Python analysis test discovery passed 39 tests for this revision.
+Changes at a shared cell requeue every incident path until a common fixed point
+is reached. If propagation is incomplete, exhaustive DFS selects a
+minimum-domain cell, breaks ties by unresolved Sudoku and comparison pressure,
+and tries values by descending immediate reduction score. These choices affect
+only traversal order.
 
-The production identity is schema `thermo-17c-overlap-chunk-run-v1`, algorithm
-revision `saturated-axis-poset-antichain-hamiltonian-v1`, corpus FNV-1a64
-`96baf249978384bb`, 49,158 records, 25,370 eligible records, 16 eligible
-records per chunk, and exactly 1,586 contiguous chunks. Its command is the one
-above with those explicit options. A read-only planning check is available as:
+The scanner requests two solutions. `0` is an internal consistency failure
+because the catalogue target is known; `1` is a unique candidate; `2+` is
+multiple. The production run used no node limit, task timeout, alternate
+solver, or fallback classification.
 
-```text
-python analysis/run_17c_overlap_chunks.py \
-  --corpus <path-to>/17puz49158.txt \
-  --binary <path-to-frozen-v1-thermo-17c-overlap.exe> \
-  --output-dir <artifact-root>/overlap-exact \
-  --workers 4 --eligible-per-chunk 16 --dry-run
-```
+## Production identity and command
 
-The `--dry-run` output must report the same corpus and binary hashes, 25,370
-eligible records and 1,586 chunks. The actual run directory is local under
-ignored `runs/`; neither partial progress nor a future result is silently
-included in the Git commit.
-
-### Successor `v2` implementation identity
-
-The unified solver revision was built and validated on 2026-08-25 with the same
-Rust/Cargo 1.94.0 MSVC toolchain. Its pre-run identities are:
+The completed run used Rust/Cargo 1.94.0 on
+`x86_64-pc-windows-msvc` and the following identities:
 
 | Input or implementation | Bytes | SHA-256 |
 |---|---:|---|
 | `17puz49158.txt` | 4,080,114 | `58EF7D83E8CBAC32495161F9745877FEF82F5E8B3FE58E3CAD4EB3FC004A81B9` |
 | `thermo-sudoku-rs/Cargo.toml` | 357 | `2EF150F573911E9890DB35DC9D6858CCB5B084F337C99CF146D2163F2A6BB25F` |
-| `src/lib.rs` | 106,593 | `6C3FFCE7C751F5F354143A025B28B7081D8381B7F3B38D947775FDB9F2250D91` |
-| `src/bin/thermo-17c-overlap.rs` | 121,675 | `76D89F253CC97CBEF0696AE89B0CCFAFB7F3F6EB97EBB7AA6ECE403F9414D621` |
+| `thermo-sudoku-rs/src/lib.rs` | 106,593 | `6C3FFCE7C751F5F354143A025B28B7081D8381B7F3B38D947775FDB9F2250D91` |
+| `thermo-sudoku-rs/src/bin/thermo-17c-overlap.rs` | 121,675 | `76D89F253CC97CBEF0696AE89B0CCFAFB7F3F6EB97EBB7AA6ECE403F9414D621` |
 | `analysis/run_17c_overlap_chunks.py` | 66,457 | `CC65595F253BEF0185757303A8009E4ACD98EE319866C3150C70AF6173C24626` |
-| release `thermo-17c-overlap.exe` | 401,920 | `23E3491164A658A1F59E705483D37C97CC2F383CBA4C4267A9F3CBC43EBDB215` |
+| release executable | 401,920 | `23E3491164A658A1F59E705483D37C97CC2F383CBA4C4267A9F3CBC43EBDB215` |
 
-`src/comparison.rs` no longer exists: its overlap functionality was folded into
-`Solver` in `src/lib.rs`. The release all-target suite passed 159 tests; one
-additional exhaustive regression was deliberately ignored. Strict Clippy and
-formatting checks passed, as did all 39 Python analysis tests. A production run
-must additionally record these identities in a fresh `run-identity.json` and
-reproduce the algorithm revision stated above.
+Algorithm revision:
 
-## Bounded measurements
+```text
+saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2
+```
 
-The fixed identity-coordinate and natural-order slice traversed all 49,158
-records in under a quarter second and produced no candidate. This is an exact
-result for that one slice only, not for the generalized search.
+Build and run from the repository root:
 
-Before the target-aware alternative shortcut, a stratified exact sample of
-100 eligible records classified 312,895 closure-maximal candidates in 59.45
-seconds. The median record took 0.335 seconds and the 90th percentile 0.618
-seconds. One exceptional record took about 19 seconds and 16.6 million solver
-nodes. That sample suggested roughly 4.2 serial CPU hours, or two to four wall
-hours with four workers. The full run falsified this timing extrapolation: the
-rare record-level tail is far heavier than the stratified pilot captured.
+```text
+cargo build --release --manifest-path thermo-sudoku-rs/Cargo.toml --bin thermo-17c-overlap
+python analysis/run_17c_overlap_chunks.py --corpus <path-to>/17puz49158.txt --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe --output-dir <artifact-root>/17c-overlap-v2 --workers 4 --eligible-per-chunk 16
+```
 
-The exact full run began at 2026-08-23 18:37 CEST. At the fixed 2026-08-24
-06:14 snapshot it had published 324 of 1,586 chunks (20.43%), covering 5,184
-eligible records and classifying 17,884,839 closure-maximal networks, all
-multiple. No unique case or error had occurred. Among completed chunks the
-median scanner time was 9.33 seconds, the 95th percentile 757 seconds, and the
-maximum 26,258 seconds (7.29 hours); two then-active chunks had already run for
-more than ten hours each. A censor-aware estimate at that snapshot was roughly
-55 to 85 additional wall hours. These figures are an operational progress
-record only. They neither sample the remaining catalogue uniformly nor support
-a mathematical completion percentage.
+On non-Windows systems, omit `.exe`. Repeating the same runner command validates
+published artifacts and resumes only missing chunks. The output directory is
+bound to the corpus hash, executable hash, chunk size, and algorithm revision.
 
-At 2026-08-24 21:35 CEST the first launcher invocation was deliberately stopped
-after 671 parent chunks had been published: 10,736 eligible records and
-30,930,497 closure-maximal candidates had been classified, with no unique case
-or error. Four in-flight parent chunks had then occupied cores for roughly 26,
-8.2, 6.8 and 4.0 hours. Across the 671 completed chunks, elapsed time correlated
-almost perfectly with solver nodes (Pearson `r = 0.9986`) but not with candidate
-count (`r = 0.0357`), locating the heavy tail inside the Sudoku comparison
-search rather than morph enumeration. The four parents were committed to exact
-one-record child partitions and the run was resumed with one split worker and
-three ordinary workers. All 671 published artifacts were retained; four
-zero-length interrupted partials were ignored. This intervention changes only
-scheduling and evidence packaging, not the candidate set or classification
-algorithm, and it is not a search result.
+The completed run produced:
 
-The record-only intervention then exposed the flaw in retaining a permanently
-active hard lane. At the controlled 2026-08-25 07:09 CEST stop, 760 parent
-artifacts and six singleton children covered 12,166 eligible records and
-34,901,476 classified candidates, all multiple, with zero unique or zero-solution
-errors. No artifact had been published since 02:02. The four active tasks had
-run for about 9.6, 9.6, 7.4 and 5.1 hours; the split task was already the single
-eligible record on catalogue line 835. This confirmed that record subdivision
-identifies the hard case but does not by itself prevent renewed saturation.
+| Field | Value |
+|---|---:|
+| Logical chunks | 1,586 / 1,586 |
+| Source records | 49,158 / 49,158 |
+| Eligible records | 25,370 |
+| Retained candidates | 65,561,076 |
+| Multiple | 65,561,076 |
+| Unique | 0 |
+| Impossible target | 0 |
+| Solver nodes | 10,044,810,358 |
+| Wall time | 9,483.964 s |
+| Artifact bytes | 6,020,687 |
+| Artifact-set SHA-256 | `312b76f3f41112042f6918447abbd08bd1c2f52a6426cc814e02d6d8c04e554f` |
 
-The bounded policy follows the measured tail. Only 19 of the 760 completed
-parents exceeded 30 minutes, but they consumed 52.09 of 69.47 aggregate scanner
-hours. Parents therefore receive 1,800 seconds before automatic subdivision,
-while singleton records receive 300 seconds before deferral. The latter is
-generous relative to the six completed siblings of line 835, which each took
-under four seconds. These thresholds affect scheduling only; they cannot turn
-an unresolved case into evidence.
+The 1,586 detailed JSONL files are local run artifacts and are ignored by Git.
+The tracked compact summary preserves the aggregate counts and identities.
 
-That bounded `v1` pass ended normally on 2026-08-25 with `complete:false`.
-It completed 1,552 of 1,586 logical roots through 2,050 validated parent/child
-artifacts, covering 25,324 of 25,370 eligible catalogue records. The remaining
-46 singleton records, distributed across 34 split parents, are listed in the
-identity-bound deferred ledger. The completed work classified 65,390,245
-candidates, all multiple, with zero unique and zero impossible target cases.
-Those counts are substantial partial evidence but not an exhaustive result.
+## Audit and evidence boundary
 
-A target-aware shortcut was implemented and measured, then rejected for the
-scanner. It stopped after the first solution differing from the 17 mapped
-catalogue clues, and every candidate on lines 1 and 803 did take that shortcut.
-Nevertheless the expensive work was reaching the first solution, not finding
-the second: line 803 remained at about 16.6 million nodes and slowed from about
-19.1 to 24.2 seconds, while line 1 also became slightly slower. That experimental
-API was not retained in the unified solver; the scanner uses ordinary exact
-cap-two traversal.
+The final audit re-ran the launcher's artifact validator and aggregate logic
+over all 1,586 JSONL files. It confirmed:
 
-## Unified solver revision and hard-record diagnosis
+- exactly the expected filenames and no missing or unexpected artifact;
+- a contiguous, nonoverlapping cover of source lines 1 through 49,158;
+- matching header and terminal fingerprints for every artifact;
+- exact requested-range completion for every chunk;
+- uniform corpus, executable, and algorithm identities;
+- `classified = multiple + unique + zero` in every artifact and aggregate;
+- no partial file, split manifest, deferred task, timeout, or fallback result;
+- an empty stderr log and normal launcher termination;
+- exact agreement between the recomputed aggregate, `summary.json`, and the
+  terminal stdout record.
 
-The deferred records exposed a branch-order pathology, not difficult puzzle
-structure and not a flaw in overlap propagation. Reconstructing all candidates
-for all 46 records took only 9.27 seconds, including process startup and input
-parsing. On catalogue line 835, candidates 945 and 946 (one-based) have nearly
-identical edge and closure counts. The former found two solutions in 41 nodes,
-while the old fixed low-first search explored ten million nodes on the latter
-without reaching a solution. Reversing every inequality, which is equivalent
-under global digit complement, made the same latter case finish in 47 nodes.
-Removing redundant comparison edges did not remove the tail.
+Verification commands for the maintained source are:
 
-The original path solver used the same low-first ordering and reproduced the
-pathology on a weaker cell-disjoint sublayout under selected grid morphs. The
-fix therefore belongs in the common DFS rather than in a separate overlap
-backend. `Layout` now records every path incident to each cell, so the original
-chain propagator supports overlaps directly. `Solver::blank_comparisons`
-deduplicates explicit edges and presents them to that same engine as two-cell
-paths. The former standalone comparison module has been removed.
+```text
+cargo fmt --all --manifest-path thermo-sudoku-rs/Cargo.toml -- --check
+cargo test --release --all-targets --manifest-path thermo-sudoku-rs/Cargo.toml
+cargo clippy --all-targets --all-features --manifest-path thermo-sudoku-rs/Cargo.toml -- -D warnings
+python -m unittest discover -s analysis -p "test_*.py" -v
+```
 
-With dynamic constraint-pressure cell selection and most-constraining-first
-values, line 835 candidate 946 takes 29 to 41 nodes across all eight dihedral
-morphs and both complement orientations. A fresh release diagnostic then ran
-all 170,831 candidates of the 46 deferred records exactly and without node
-limits or fallback solvers: all 170,831 were multiple, with zero unique and zero
-impossible target cases, in 158.814 seconds and 73,198,384 total nodes. Five
-individual candidates still account for almost all of that residual tail, but
-the longest record took 106.753 seconds rather than hours.
-
-Additional disposable diagnostics covered all 20,464 morph/complement cases of
-1,279 valid disjoint 9+8+2 layouts (maximum 66 nodes) and compared 10,000 fully
-exhausted random overlap graphs with a temporary build of the frozen `v1`
-comparison source identified above; every complete solution set agreed. The
-diagnostic harness and output are not retained evidence. The tracked release
-suite separately checks overlapping incremental propagation against a full-scan
-reference and explicit graphs against complete solution filtering. The
-successor scanner revision is
-`saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2`. A fresh
-complete run and aggregate audit are still required before the 17-cell question
-can be reported closed.
-
-The retained historical pilot artifacts are:
-
-- `17c-overlap-identity-2026-08-23.jsonl`: complete only for the identity
-  coordinate and natural-order slice;
-- `17c-overlap-guided-100-2026-08-23.jsonl`: 100 dense-first guided cases, all
-  multiple, explicitly incomplete.
-
-Neither artifact supports a global 17-cell conclusion.
-
-## Evidence boundary
-
-A positive candidate can be verified independently by blocking its target and
-solving the comparison Sudoku again. A completed negative scan is a
-deterministic exhaustive-program result conditional on the audited 49,158
-catalogue and the reductions above; it is not a SAT/LRAT nonexistence
-certificate.
-
-Before reporting a negative result, an auditor must at minimum check:
-
-1. the corpus SHA-256, record count and syntax;
-2. `run-identity.json` against the executable hash, algorithm revision, chunk
-   size, eligible count and total chunk count above;
-3. that each of the 1,586 logical parent chunks is represented by either its
-   parent artifact or one committed, complete child partition, never both, and
-   that the selected leaves cover source lines 1 through 49,158 exactly once;
-4. every selected leaf through the launcher's `validate_artifact` checks and
-   every split manifest against its bound corpus, executable, revision, parent
-   range and exact child cover, including
-   header/summary fingerprint agreement, exact range exhaustion, target-true
-   zero count of zero, and `classified = unique + multiple` cap-two
-   accounting;
-5. that `deferred-tasks.json`, if present, passes its schema and run-identity
-   validation, has an empty task list, matches the aggregate's recomputed
-   `deferred_manifest_sha256`, and that the aggregate reports zero deferred
-   singletons; and
-6. terminal `summary.json` fields `complete:true`,
-   `completed_chunks:1586`, `unique_found:false`, `totals.unique:0`, and an
-   artifact-set SHA-256 plus split-manifest-set SHA-256 recomputed from the
-   validated selected leaves and manifests.
-
-Running the identical launcher command after completion performs checks 2–6
-again and has no pending work. This independently validates the orchestration
-and accounting, but it does not turn the negative into a proof certificate:
-multiplicity of the non-emitted ordinary cases and exhaustiveness of the
-reductions still rest on the exact Rust implementation. A positive case, if
-one appears, is emitted immediately and requires a second solver or a fresh
-target-blocking exhaustive solve before publication.
-
-Until every exact chunk has completed and this aggregate audit has succeeded,
-the existence of a 17-cell construction remains open.
+This is a deterministic exhaustive-program result conditional on the
+completeness of the 49,158-record catalogue and the correctness of the
+documented reductions and implementation. It is not a SAT/LRAT nonexistence
+certificate. Ordinary multiple cases were counted to two but their witness
+pairs were not emitted, so the compact aggregate alone is not an independently
+checkable certificate for every classification. A fresh run reproduces the
+search and accounting.

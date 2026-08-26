@@ -1,0 +1,13 @@
+{
+  "algorithm_revision": "saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2",
+  "binary_bytes": 401920,
+  "binary_sha256": "23e3491164a658a1f59e705483d37c97cc2f383cba4c4267a9f3cbc43ebdb215",
+  "chunks": 1586,
+  "corpus_bytes": 4080114,
+  "corpus_fnv1a64": "96baf249978384bb",
+  "corpus_sha256": "58ef7d83e8cbac32495161f9745877fef82f5e8b3fe58e3cad4eb3fc004a81b9",
+  "eligible_per_chunk": 16,
+  "eligible_records": 25370,
+  "records": 49158,
+  "schema": "thermo-17c-overlap-chunk-run-v1"
+}

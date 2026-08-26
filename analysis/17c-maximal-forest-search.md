@@ -1,10 +1,19 @@
 # Exact maximal-forest search for 17-cell thermo coverage
 
+## Contents
+
+- [Reduction](#reduction)
+- [Why only merge-maximal layouts are needed](#why-only-merge-maximal-layouts-are-needed)
+- [Enumerator](#enumerator)
+- [Completed merge-maximal eight-path representatives](#completed-merge-maximal-eight-path-representatives)
+- [Certificate boundary](#certificate-boundary)
+
 This note records the exact search developed after the complete 9+8 and
 three-thermometer catalogue scans. It covers the four- through eight-
 thermometer layers without extending the earlier labelled-role DFS directly.
-The merge-maximal eight-path representatives are complete; global existence
-work in this disjoint fallback can continue with four through seven paths.
+The merge-maximal eight-path representatives are complete. The four-through-
+seven-path fallback was superseded by the completed generalized search in
+`17c-overlap-search.md`.
 
 ## Reduction
 
@@ -165,14 +174,12 @@ for the Git repository.
 Each emitted pair of distinct Sudoku grids is a direct, independently
 checkable multiplicity certificate for its layout. Exhaustiveness is a
 deterministic program result resting on the reduction and implementation; it
-is not a SAT/LRAT-style independently checkable nonexistence proof. Any final
-negative 17-cell conclusion must also cite the catalogue completeness and the
-completed 9+8 and three-path scans.
+is not a SAT/LRAT-style independently checkable nonexistence proof. This
+standalone result covers the merge-maximal eight-path representatives; the
+complete generalized 17-cell exclusion is documented separately.
 
-This disjoint-path enumerator is now the conservative fallback rather than the
-preferred next full run. If overlapping two-cell thermometers are admitted,
-the saturated-network theorem in `17c-overlap-search.md` tests a strict
+The completed saturated-network scan in `17c-overlap-search.md` tests a strict
 superset of all 40 post-three-path disjoint partitions, including non-maximal
-eight-path layouts, without enumerating them separately. A complete negative
-saturated scan would therefore make resuming the slower disjoint shards
-unnecessary.
+eight-path layouts, and found no unique candidate. Resuming the slower
+four-through-seven-path disjoint shards is therefore unnecessary for the
+17-cell existence question.

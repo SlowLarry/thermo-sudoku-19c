@@ -1,5 +1,15 @@
 # Exact 17-cell search through the complete classic catalogue
 
+## Contents
+
+- [Why the catalogue reduction is complete](#why-the-catalogue-reduction-is-complete)
+- [Input corpus](#input-corpus)
+- [First exact stratum: 9+8](#first-exact-stratum-98)
+- [Complete 9+8 result](#complete-98-result)
+- [Second exact stratum: three thermometers](#second-exact-stratum-three-thermometers)
+- [Complete three-path result](#complete-three-path-result)
+- [Scope after this scan](#scope-after-this-scan)
+
 ## Why the catalogue reduction is complete
 
 Let a thermo-only puzzle cover the cell set `C`, and let `S` be its unique
@@ -10,7 +20,8 @@ satisfies all of the thermometers, so that ordinary Sudoku must also be unique.
 Consequently, a unique thermo puzzle covering 17 cells must be a morph of one
 of the complete 49,158 essentially different 17-clue classics.  The same
 argument, combined with the [no-16-clue theorem](https://arxiv.org/abs/1201.0749),
-also proves that 17 cells is the absolute lower bound for thermo coverage.
+excludes coverage below 17 cells. The completed generalized scan later
+strengthens the lower bound to 18.
 
 The converse needs an exact check: making the 17 clue values increase along
 some paths is not enough, because inequalities are weaker than exact givens.
@@ -233,17 +244,13 @@ alone, it left forty of the 51 path-length partitions:
 | 7 | 3 | 10 |
 | 8 | 1 | 9 |
 
-A negative result for the stronger three-path layer does not automatically
-exclude these different disjoint geometries. The later merge-maximal forest
-search in `17c-maximal-forest-search.md` has since classified all 151,631
-merge-maximal eight-path occurrences as multiple. Any unique non-maximal
-eight-path layout would extend to a unique lower-path dominator. Therefore the
-global disjoint existence search can continue with only the 39 four- through
-seven-path partitions, although the eight-path result is not a standalone
-exclusion of every non-maximal layout in that partition.
+A negative result for the stronger three-path layer does not by itself exclude
+these different disjoint geometries. The later merge-maximal forest search in
+`17c-maximal-forest-search.md` classified all 151,631 merge-maximal eight-path
+occurrences as multiple.
 
-A broader exact route is now preferable: when shared cells and arbitrary
-two-cell thermometers are admitted, the saturation theorem in
-`17c-overlap-search.md` tests a superset of all 40 post-three-path partitions,
-including non-maximal eight-path layouts, without enumerating them
-individually. No complete result from that generalized scan is claimed yet.
+The completed saturated-network scan in `17c-overlap-search.md` now excludes a
+strict superset of all 40 post-three-path partitions, including non-maximal
+eight-path layouts, without enumerating those path partitions individually.
+Consequently every 17-cell cell-disjoint layout is excluded as part of the
+generalized result.
