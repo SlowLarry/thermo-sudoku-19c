@@ -28,7 +28,7 @@ impl Thermometer {
 pub struct Layout {
     thermometers: Vec<Thermometer>,
     thermo_incident: [u64; 81],
-    comparison_neighbors: [Vec<ComparisonNeighbor>; 81],
+    heuristic_neighbors: [Vec<ComparisonNeighbor>; 81],
     all_thermos: u64,
 }
 
@@ -36,6 +36,104 @@ pub struct Layout {
 struct ComparisonNeighbor {
     other: u8,
     cell_is_lower: bool,
+}
+
+/// Build the unique transitive reduction of the comparison DAG for heuristic
+/// scoring. Propagation continues to use every original thermometer. If the
+/// graph contains a directed cycle, keep its deduplicated direct edges; such a
+/// layout is contradictory, and retaining the input constraints is the safest
+/// scoring fallback until propagation detects that fact.
+fn build_heuristic_neighbors_from_direct(direct: &[u128; 81]) -> [Vec<ComparisonNeighbor>; 81] {
+    let mut active = 0u128;
+    let mut indegree = [0u8; 81];
+    for (lower, &uppers) in direct.iter().enumerate() {
+        if uppers != 0 {
+            active |= 1u128 << lower;
+        }
+        let mut remaining = uppers;
+        while remaining != 0 {
+            let upper = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+            active |= 1u128 << upper;
+            indegree[upper] += 1;
+        }
+    }
+
+    // Kahn's algorithm cheaply separates DAGs, whose transitive reduction is
+    // unique, from contradictory cycles, which retain their raw direct edges.
+    let mut ready = active;
+    for (cell, &degree) in indegree.iter().enumerate() {
+        if degree != 0 {
+            ready &= !(1u128 << cell);
+        }
+    }
+    let mut topological = [0u8; 81];
+    let mut topological_len = 0usize;
+    while ready != 0 {
+        let lower = ready.trailing_zeros() as usize;
+        ready &= ready - 1;
+        topological[topological_len] = lower as u8;
+        topological_len += 1;
+        let mut uppers = direct[lower];
+        while uppers != 0 {
+            let upper = uppers.trailing_zeros() as usize;
+            uppers &= uppers - 1;
+            indegree[upper] -= 1;
+            if indegree[upper] == 0 {
+                ready |= 1u128 << upper;
+            }
+        }
+    }
+
+    let cyclic = topological_len != active.count_ones() as usize;
+    let mut reduced = *direct;
+    if !cyclic {
+        let mut reach = [0u128; 81];
+        for &lower in topological[..topological_len].iter().rev() {
+            let lower = lower as usize;
+            let mut uppers = direct[lower];
+            while uppers != 0 {
+                let upper = uppers.trailing_zeros() as usize;
+                uppers &= uppers - 1;
+                reach[lower] |= (1u128 << upper) | reach[upper];
+            }
+        }
+        for (lower, &direct_uppers) in direct.iter().enumerate() {
+            let mut uppers = direct_uppers;
+            while uppers != 0 {
+                let upper = uppers.trailing_zeros() as usize;
+                uppers &= uppers - 1;
+                let upper_bit = 1u128 << upper;
+                let mut alternatives = direct_uppers & !upper_bit;
+                while alternatives != 0 {
+                    let alternative = alternatives.trailing_zeros() as usize;
+                    alternatives &= alternatives - 1;
+                    if reach[alternative] & upper_bit != 0 {
+                        reduced[lower] &= !upper_bit;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut neighbors: [Vec<ComparisonNeighbor>; 81] = std::array::from_fn(|_| Vec::new());
+    for (lower, &reduced_uppers) in reduced.iter().enumerate() {
+        let mut uppers = reduced_uppers;
+        while uppers != 0 {
+            let upper = uppers.trailing_zeros() as usize;
+            uppers &= uppers - 1;
+            neighbors[lower].push(ComparisonNeighbor {
+                other: upper as u8,
+                cell_is_lower: true,
+            });
+            neighbors[upper].push(ComparisonNeighbor {
+                other: lower as u8,
+                cell_is_lower: false,
+            });
+        }
+    }
+    neighbors
 }
 
 impl Layout {
@@ -77,9 +175,7 @@ impl Layout {
         }
         let mut occupied = [false; 81];
         let mut thermo_incident = [0u64; 81];
-        let mut comparison_neighbors: [Vec<ComparisonNeighbor>; 81] =
-            std::array::from_fn(|_| Vec::new());
-        let mut seen_comparison = [[false; 81]; 81];
+        let mut direct = [0u128; 81];
         let mut thermometers = Vec::with_capacity(thermo_count);
 
         for (thermo_index, path) in paths.enumerate() {
@@ -119,27 +215,13 @@ impl Layout {
                         to: path[position],
                     });
                 }
+                direct[path[position - 1] as usize] |= 1u128 << path[position];
             }
 
             let thermo_bit = 1u64 << thermo_index;
             for &cell in path {
                 occupied[cell as usize] = true;
                 thermo_incident[cell as usize] |= thermo_bit;
-            }
-            for edge in path.windows(2) {
-                let lower = edge[0] as usize;
-                let upper = edge[1] as usize;
-                if !seen_comparison[lower][upper] {
-                    seen_comparison[lower][upper] = true;
-                    comparison_neighbors[lower].push(ComparisonNeighbor {
-                        other: upper as u8,
-                        cell_is_lower: true,
-                    });
-                    comparison_neighbors[upper].push(ComparisonNeighbor {
-                        other: lower as u8,
-                        cell_is_lower: false,
-                    });
-                }
             }
             let mut cells = [NO_CELL; 9];
             cells[..path.len()].copy_from_slice(path);
@@ -149,10 +231,11 @@ impl Layout {
             });
         }
 
+        let heuristic_neighbors = build_heuristic_neighbors_from_direct(&direct);
         Ok(Self {
             thermometers,
             thermo_incident,
-            comparison_neighbors,
+            heuristic_neighbors,
             all_thermos: if thermo_count == MAX_THERMOMETERS {
                 u64::MAX
             } else if thermo_count != 0 {
@@ -167,7 +250,7 @@ impl Layout {
         Self {
             thermometers: Vec::new(),
             thermo_incident: [0; 81],
-            comparison_neighbors: std::array::from_fn(|_| Vec::new()),
+            heuristic_neighbors: std::array::from_fn(|_| Vec::new()),
             all_thermos: 0,
         }
     }
@@ -196,18 +279,20 @@ impl Layout {
         layout.thermometers.push(Thermometer { cells, length: 2 });
         let bulb = bulb as usize;
         let tip = tip as usize;
-        layout.comparison_neighbors[bulb].push(ComparisonNeighbor {
-            other: tip as u8,
-            cell_is_lower: true,
-        });
-        layout.comparison_neighbors[tip].push(ComparisonNeighbor {
-            other: bulb as u8,
-            cell_is_lower: false,
-        });
         let thermo_bit = 1u64 << thermo_index;
         layout.thermo_incident[bulb] |= thermo_bit;
         layout.thermo_incident[tip] |= thermo_bit;
         layout.all_thermos |= thermo_bit;
+        // Extensions are required to be disjoint from every covered base cell,
+        // so this isolated edge cannot make any existing comparison redundant.
+        layout.heuristic_neighbors[bulb].push(ComparisonNeighbor {
+            other: tip as u8,
+            cell_is_lower: true,
+        });
+        layout.heuristic_neighbors[tip].push(ComparisonNeighbor {
+            other: bulb as u8,
+            cell_is_lower: false,
+        });
         layout
     }
 }
@@ -2034,6 +2119,11 @@ fn remove_candidate(state: &mut [u16; 81], cell: usize, bit: u16, changed: &mut 
     true
 }
 
+/// Choose a branch using representation-invariant comparison pressure.
+///
+/// MRV is primary. Ties use unresolved pressure on the comparison DAG's
+/// unique transitive reduction, so logically redundant input edges cannot
+/// steer DFS merely by being present.
 fn choose_branch_cell(
     state: &[u16; 81],
     layout: &Layout,
@@ -2078,34 +2168,24 @@ fn choose_branch_cell(
     Some(cell_order[unresolved] as usize)
 }
 
-/// Count constraints which can still transmit information from `cell`.
-///
-/// Static path degree proved dangerously representation-sensitive: a solved
-/// neighbour contributes nothing to the next branch, while a still-open
-/// Sudoku peer or comparison endpoint can immediately react to an assignment.
-/// This dynamic dom/degree tie-break is cheap because it is evaluated only
-/// after MRV has ruled out larger domains.
 fn unresolved_constraint_pressure(state: &[u16; 81], layout: &Layout, cell: usize) -> u16 {
     let sudoku = PEERS[cell]
         .iter()
         .filter(|&&peer| !state[peer as usize].is_power_of_two())
         .count();
-    let comparisons = layout.comparison_neighbors[cell]
+    let comparisons = layout.heuristic_neighbors[cell]
         .iter()
         .filter(|edge| !state[edge.other as usize].is_power_of_two())
         .count();
     (sudoku + comparisons) as u16
 }
 
-/// Estimate the immediate candidate removals caused by assigning `value` to
-/// `cell`. Unlike a fixed low-to-high order, the score responds to the current
-/// Sudoku and inequality domains.
 fn direct_reduction(state: &[u16; 81], layout: &Layout, cell: usize, value: u16) -> u16 {
     let mut score = PEERS[cell]
         .iter()
         .filter(|&&peer| state[peer as usize] & value != 0)
         .count() as u16;
-    for edge in &layout.comparison_neighbors[cell] {
+    for edge in &layout.heuristic_neighbors[cell] {
         let other = state[edge.other as usize];
         let removed = if edge.cell_is_lower {
             other & value.wrapping_shl(1).wrapping_sub(1)
@@ -2117,8 +2197,7 @@ fn direct_reduction(state: &[u16; 81], layout: &Layout, cell: usize, value: u16)
     score
 }
 
-/// Return candidate values in most-constraining-first order. Contradictory
-/// branches are therefore exposed early, while ties remain deterministic.
+/// Return values in descending canonical direct-reduction order.
 fn ordered_branch_values(state: &[u16; 81], layout: &Layout, cell: usize) -> ([u16; 9], usize) {
     let mut scored = [(0u16, 0u16); 9];
     let mut length = 0usize;
@@ -2355,6 +2434,42 @@ mod tests {
                 assert!(solution[edge[0] as usize] < solution[edge[1] as usize]);
             }
         }
+    }
+
+    fn initial_branch_choice(solver: &Solver) -> (usize, [u16; 9], usize) {
+        let (mut state, mut work) = solver.initial_search_state().unwrap();
+        assert!(solver.propagate(&mut state, &mut work, &mut SolveStats::default()));
+        let cell = choose_branch_cell(
+            &state,
+            &solver.layout,
+            &mut std::array::from_fn(|cell| cell as u8),
+        )
+        .unwrap();
+        let (values, value_count) = ordered_branch_values(&state, &solver.layout, cell);
+        (cell, values, value_count)
+    }
+
+    fn assert_redundant_shortcuts_do_not_change_search(
+        full: &[(u8, u8)],
+        reduced: &[(u8, u8)],
+    ) -> u64 {
+        let full = Solver::blank_comparisons(full).unwrap();
+        let reduced = Solver::blank_comparisons(reduced).unwrap();
+
+        let full_choice = initial_branch_choice(&full);
+        let reduced_choice = initial_branch_choice(&reduced);
+        assert_eq!(full_choice, reduced_choice);
+
+        let full_result = full.classify();
+        let reduced_result = reduced.classify();
+        assert_eq!(full_result.multiplicity(), Multiplicity::Multiple);
+        assert_eq!(full_result.count, reduced_result.count);
+        assert_eq!(full_result.first_solution, reduced_result.first_solution);
+        assert_eq!(full_result.second_solution, reduced_result.second_solution);
+        assert_eq!(full_result.stats.nodes, reduced_result.stats.nodes);
+        assert_eq!(full_result.stats.branches, reduced_result.stats.branches);
+        assert!(full_result.stats.nodes < 1_000, "{:#?}", full_result.stats);
+        full_result.stats.nodes
     }
 
     #[test]
@@ -2906,6 +3021,45 @@ mod tests {
     }
 
     #[test]
+    fn heuristic_graph_is_the_hasse_dag_and_cycles_keep_raw_edges() {
+        let dag = Solver::blank_comparisons(&[(0, 1), (1, 10), (0, 10)]).unwrap();
+        assert_eq!(dag.layout.thermometers.len(), 3);
+        assert_eq!(
+            dag.layout.heuristic_neighbors[0],
+            vec![ComparisonNeighbor {
+                other: 1,
+                cell_is_lower: true,
+            }]
+        );
+        assert_eq!(
+            dag.layout.heuristic_neighbors[1],
+            vec![
+                ComparisonNeighbor {
+                    other: 0,
+                    cell_is_lower: false,
+                },
+                ComparisonNeighbor {
+                    other: 10,
+                    cell_is_lower: true,
+                },
+            ]
+        );
+        assert_eq!(
+            dag.layout.heuristic_neighbors[10],
+            vec![ComparisonNeighbor {
+                other: 1,
+                cell_is_lower: false,
+            }]
+        );
+
+        let cycle = Solver::blank_comparisons(&[(0, 1), (1, 10), (10, 0)]).unwrap();
+        assert_eq!(cycle.layout.thermometers.len(), 3);
+        assert_eq!(cycle.layout.heuristic_neighbors[0].len(), 2);
+        assert_eq!(cycle.layout.heuristic_neighbors[1].len(), 2);
+        assert_eq!(cycle.layout.heuristic_neighbors[10].len(), 2);
+    }
+
+    #[test]
     fn overlapping_branches_diamonds_and_cycles_use_the_unified_solver() {
         for paths in [
             vec![vec![0, 10, 20], vec![10, 19]],
@@ -2968,6 +3122,73 @@ mod tests {
                 maximum: 64
             }))
         ));
+    }
+
+    #[test]
+    fn hasse_scoring_ignores_the_pathological_1049_shortcut() {
+        let full = [
+            (17, 8),
+            (19, 29),
+            (20, 19),
+            (20, 29),
+            (32, 41),
+            (39, 29),
+            (39, 47),
+            (41, 50),
+            (41, 51),
+            (50, 51),
+            (50, 58),
+            (50, 60),
+            (51, 52),
+            (51, 60),
+            (52, 60),
+            (58, 67),
+            (72, 63),
+        ];
+        let reduced: Vec<_> = full
+            .iter()
+            .copied()
+            .filter(|&comparison| comparison != (50, 60))
+            .collect();
+
+        assert_eq!(
+            assert_redundant_shortcuts_do_not_change_search(&full, &reduced),
+            38
+        );
+    }
+
+    #[test]
+    fn hasse_scoring_ignores_the_pathological_1480_shortcuts() {
+        let full = [
+            (6, 14),
+            (16, 6),
+            (18, 28),
+            (28, 29),
+            (28, 38),
+            (29, 38),
+            (29, 39),
+            (38, 39),
+            (53, 44),
+            (53, 61),
+            (56, 55),
+            (56, 64),
+            (64, 55),
+            (66, 56),
+            (66, 75),
+            (66, 76),
+            (75, 76),
+        ];
+        let redundant = [(28, 38), (29, 39), (56, 55), (66, 76)];
+        let reduced: Vec<_> = full
+            .iter()
+            .copied()
+            .filter(|comparison| !redundant.contains(comparison))
+            .collect();
+
+        assert_eq!(
+            assert_redundant_shortcuts_do_not_change_search(&full, &reduced),
+            37
+        );
     }
 
     #[test]

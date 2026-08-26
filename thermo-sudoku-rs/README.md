@@ -54,10 +54,17 @@ classified as unsatisfiable by the same propagation and search.
 If propagation does not decide the puzzle, deterministic DFS:
 
 1. chooses a cell with minimum remaining domain size;
-2. among ties, maximizes the number of unresolved Sudoku peers plus unresolved
-   comparison neighbours;
-3. scores each value by its immediate removals from those neighbours and tries
+2. uses the unique transitive reduction (Hasse graph) of every acyclic
+   comparison network for scoring, while retaining the complete input paths
+   for propagation;
+3. among cell ties, maximizes the number of unresolved Sudoku peers plus
+   unresolved Hasse neighbours;
+4. scores each value by its immediate removals from those neighbours and tries
    the most constraining value first, using the lower digit as the final tie.
+
+Using the Hasse graph prevents a transitively redundant comparison from
+changing the traversal order. Contradictory cyclic networks retain their raw
+deduplicated comparison graph for scoring and are still classified exactly.
 
 These choices affect only traversal order. Search remains exhaustive. The main
 classification call counts to two and reports `Zero`, `Unique`, or `Multiple`.
@@ -126,15 +133,18 @@ for independent checking.
 | `thermo-global-cegis` | Target-free comparison-set CEGIS experiment. |
 | `thermo-topology-cnf` | SAT encoding and persistent CEGIS for cell-disjoint path topology. |
 
-The completed generalized 17-cell scan is reproduced through the validated
-chunk runner:
+Run the current generalized scanner through the validated chunk runner:
 
 ```text
 cargo build --release --manifest-path thermo-sudoku-rs/Cargo.toml --bin thermo-17c-overlap
-python analysis/run_17c_overlap_chunks.py --corpus <path-to>/17puz49158.txt --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe --output-dir <artifact-root>/17c-overlap-v2 --workers 4 --eligible-per-chunk 16
+python analysis/run_17c_overlap_chunks.py --corpus <path-to>/17puz49158.txt --binary thermo-sudoku-rs/target/release/thermo-17c-overlap.exe --output-dir <artifact-root>/17c-overlap-v3 --workers 4 --eligible-per-chunk 16
 ```
 
 On non-Windows systems, omit executable `.exe` suffixes.
+
+The completed `v2` evidence used commit
+`551db12c0924a3d7c594f489bbc971d30f8763f9`; check out that commit before
+rebuilding if its historical implementation and identities are required.
 
 This invocation sets no task timeout or solver node limit and uses no alternate
 or fallback solver.

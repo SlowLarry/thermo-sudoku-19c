@@ -189,8 +189,9 @@ solver, or fallback classification.
 
 ## Production identity and command
 
-The completed run used Rust/Cargo 1.94.0 on
-`x86_64-pc-windows-msvc` and the following identities:
+The completed run used repository commit
+`551db12c0924a3d7c594f489bbc971d30f8763f9`, Rust/Cargo 1.94.0 on
+`x86_64-pc-windows-msvc`, and the following identities:
 
 | Input or implementation | Bytes | SHA-256 |
 |---|---:|---|
@@ -207,7 +208,8 @@ Algorithm revision:
 saturated-axis-poset-antichain-hamiltonian-unified-dynamic-mcv-v2
 ```
 
-Build and run from the repository root:
+To reproduce the `v2` implementation, check out that commit, then build and
+run from the repository root:
 
 ```text
 cargo build --release --manifest-path thermo-sudoku-rs/Cargo.toml --bin thermo-17c-overlap
