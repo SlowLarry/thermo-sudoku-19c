@@ -1,0 +1,121 @@
+{
+  "schema": "thermo-18c-beam-landscape-summary-v1",
+  "scope": {
+    "global_18c_exhaustive": false,
+    "negative_result_proof": false,
+    "complete_only_for_declared_round": true,
+    "description": "Derived compact summary; the full content-addressed JSONL is the evidence artifact."
+  },
+  "seed_input": {
+    "path": "analysis/18c-seeds-v1.jsonl",
+    "bytes": 124417,
+    "sha256": "8e6a11d7d7e7f51dd497e64ca6d9ed7ae492b42fea60d46bb2aeded51f2bf99e"
+  },
+  "implementation": {
+    "algorithm_revision": "strict-seed-replay-w16-q4-retarget-radius1-hasse-cache-configurable-probe-v1",
+    "binary": {
+      "bytes": 459776,
+      "sha256": "dac939a6100ac095df64a85e1efde083fbb98fd951e23e89eaa98ae639c995bf"
+    }
+  },
+  "full_artifact": {
+    "path": "runs/18c-beam-round1-landscape4096-v1.jsonl",
+    "tracked": false,
+    "bytes": 16269145,
+    "sha256": "d3b7571679a63c4e50085433b05d082000f8683d32baac0fa0564f5e6e1cdc6b",
+    "sha256_records_2_through_eof_utf8_lf": "a0e80b9224714df4279670e4a6de0ea1612578df41bf6dda68fd5e7f56ff0577",
+    "records": 9313,
+    "networks": 9311
+  },
+  "configuration": {
+    "seed_archive": 71,
+    "initial_frontier": 16,
+    "pending_seeds": 55,
+    "beam_width": 16,
+    "exploration_frontier_slots": 4,
+    "target_witnesses_per_network_max": 4,
+    "normal_cap": 129,
+    "exploration_probes_requested": 75000,
+    "exploration_probes_actual": 9240,
+    "exploration_cap": 4096,
+    "max_new_network_counts": 75000,
+    "max_total_solver_calls": 80000
+  },
+  "generation": {
+    "raw_attempts": 72640,
+    "radius_rejections": 37216,
+    "coverage_rejections": 1598,
+    "accepted_observations": 33826,
+    "already_visited_observations": 64,
+    "duplicate_new_observations": 24522,
+    "new_canonical_networks": 9240
+  },
+  "classification": {
+    "seed_replay_calls": 71,
+    "normal_calls": 9240,
+    "normal_exact": 0,
+    "normal_at_least_129": 9240,
+    "exploration_calls": 9240,
+    "generated_exact_below_4096": 72,
+    "generated_at_least_4096": 9168,
+    "archive_exact": 143,
+    "archive_lower_bounds": 9168,
+    "best_seed_count": 128,
+    "best_generated_count": 518,
+    "unique_found": false
+  },
+  "generated_exact_count_thresholds": {
+    "below_1024": 3,
+    "below_2048": 19,
+    "below_4096": 72
+  },
+  "generated_exact_count_bins": {
+    "500_999": 3,
+    "1000_1499": 9,
+    "1500_1999": 6,
+    "2000_2499": 6,
+    "2500_2999": 19,
+    "3000_3499": 10,
+    "3500_4095": 19
+  },
+  "generated_exact_counts": [
+    518, 948, 988, 1121, 1191, 1304, 1314, 1366, 1385, 1389, 1410, 1425,
+    1615, 1685, 1718, 1740, 1875, 1899, 2018, 2124, 2261, 2362, 2418,
+    2420, 2580, 2589, 2604, 2608, 2674, 2756, 2757, 2765, 2800, 2802,
+    2804, 2813, 2844, 2866, 2906, 2919, 2970, 2995, 2995, 3052, 3052,
+    3053, 3068, 3195, 3288, 3320, 3343, 3382, 3424, 3534, 3545, 3586,
+    3630, 3641, 3687, 3717, 3757, 3787, 3809, 3811, 3842, 3856, 3903,
+    3944, 3944, 3985, 4049, 4054
+  ],
+  "generated_exact_hasse_edge_histogram": {
+    "16": 64,
+    "17": 8
+  },
+  "best_generated": {
+    "network_sha256": "01f8d095a4b63ba1ffd5c848057dd151c9d36b47ffee47480fcb40ece410acb7",
+    "count": 518,
+    "parent_network_sha256": "292eeb991cae088115f5fe8ad2f647ba7f9340a599515f24dc8e0464ff1a3de5",
+    "parent_count": 518,
+    "parent_seed_ordinal": 63,
+    "target_ordinal": 2,
+    "move": {
+      "removed_cell": 31,
+      "added_cell": 30
+    },
+    "hasse_edges": 16,
+    "full_saturated_edges": 35
+  },
+  "solver_totals": {
+    "calls": 18551,
+    "nodes": 78928150,
+    "branches": 39579387,
+    "propagation_rounds": 1163798644,
+    "comparison_revisions": 8078951,
+    "max_depth": 43
+  },
+  "terminal": {
+    "status": "round-complete",
+    "all_ceilings_clear": true,
+    "next_frontier_size": 16
+  }
+}

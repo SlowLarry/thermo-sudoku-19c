@@ -1,0 +1,81 @@
+{
+  "schema": "thermo-18c-beam-round2-summary-v1",
+  "scope": {
+    "description": "one complete deterministic continuation round from the frozen round-one frontier",
+    "global_18c_exhaustive": false,
+    "negative_result_proof": false
+  },
+  "algorithm_revision": "strict-round1-continuation-w16-q8-signature-diverse-balanced-retarget-radius1-v1",
+  "inputs": {
+    "seeds": {
+      "bytes": 124417,
+      "sha256": "8e6a11d7d7e7f51dd497e64ca6d9ed7ae492b42fea60d46bb2aeded51f2bf99e"
+    },
+    "round1_artifact": {
+      "bytes": 16269145,
+      "sha256": "d3b7571679a63c4e50085433b05d082000f8683d32baac0fa0564f5e6e1cdc6b",
+      "records_2_through_eof_sha256": "a0e80b9224714df4279670e4a6de0ea1612578df41bf6dda68fd5e7f56ff0577"
+    }
+  },
+  "executable": {
+    "bytes": 763904,
+    "sha256": "5ffbe7d608395ba0793613c9a18727f26048e752e9e7201e8070cfde7dc70e6e"
+  },
+  "artifact": {
+    "records": 21771,
+    "bytes": 64925329,
+    "sha256": "d1b080f52243775fba5446c0a84c0dfd6a14b705f16b471e57820f433922763a",
+    "records_2_through_eof_sha256": "866064a652202a069b00821860908bb18278c5e58f2d2a27e6bb2ee45873a67f",
+    "ordered_network_identity_sha256": "4e555a1706e6097e3104410297d6082f2f2b602b3bc534d0492a7b903d790a14"
+  },
+  "configuration": {
+    "parents": 16,
+    "target_witnesses_per_parent": 8,
+    "normal_cap": 129,
+    "high_cap": 4096,
+    "high_cap_probes": 12458,
+    "moves": [
+      "same-footprint target resaturation",
+      "one-cell footprint exchange"
+    ]
+  },
+  "target_pools": {
+    "calls": 16,
+    "solutions_returned": 29207,
+    "selected_witnesses": 128
+  },
+  "moves": {
+    "raw_attempts": 145280,
+    "radius_rejections": 72648,
+    "coverage_rejections": 2173,
+    "accepted_observations": 70459,
+    "visited_observations": 4250,
+    "duplicate_new_observations": 53751,
+    "new_canonical_networks": 12458
+  },
+  "classification": {
+    "new_exact_below_4096": 66,
+    "new_at_least_4096": 12392,
+    "best_new_exact_count": 560,
+    "unique": 0,
+    "incumbent_before": 128,
+    "incumbent_after": 128,
+    "archive_exact": 209,
+    "archive_lower_bound": 21560,
+    "archive_unclassified": 0
+  },
+  "solver_totals": {
+    "calls": 24932,
+    "nodes": 106763318,
+    "branches": 53565185,
+    "propagation_rounds": 1602639733,
+    "comparison_revisions": 17451418,
+    "max_depth": 47
+  },
+  "result": {
+    "round_complete": true,
+    "unique_found": false,
+    "incumbent_improved": false,
+    "statement": "The declared round produced no unique network and did not improve the 128-solution incumbent."
+  }
+}

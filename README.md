@@ -9,6 +9,7 @@ construction covers 19 cells. The minimum is therefore 18 or 19 cells.
 
 - [Current results](#current-results)
 - [Puzzle model](#puzzle-model)
+- [Constructive 18-cell search](#constructive-18-cell-search)
 - [Exact 17-cell method](#exact-17-cell-method)
 - [Reproduction](#reproduction)
 - [Repository layout](#repository-layout)
@@ -20,6 +21,7 @@ construction covers 19 cells. The minimum is therefore 18 or 19 cells.
 | --- | --- | --- |
 | Generalized 17-cell networks | **No** | The complete `v2` saturated-network scan classified 65,561,076 candidates as multiple, with zero unique or impossible targets. It covers disjoint, overlapping, branching, and merging comparison networks. |
 | General lower bound | **At least 18 covered cells** | The no-16-clue theorem excludes coverage of 16 or fewer cells; the completed generalized scan excludes exactly 17. |
+| Generalized 18-cell networks | **Open** | Independent constructive searches found no unique network; the best state has 128 solutions. Exact local closures around 211 roots and one complete two-cell shell also found no improvement. |
 | 19-cell existence | **Yes** | A cell-disjoint `9+8+2` puzzle is uniquely solvable and independently verified. [Puzzle and verification](analysis/unique-19c-9x8x2-2026-08-21.md). |
 | Exact minimum | **18 or 19 cells** | The 18-cell case remains open. |
 
@@ -36,10 +38,45 @@ The project distinguishes two scopes:
 - **Cell-disjoint paths:** different thermometers share no cells.
 - **Generalized networks:** thermometer paths may share cells or segments, and
   their union may branch or merge. Equivalently, the layout is any finite set of directed two-cell
-  king-neighbour inequalities. Every one of the 17 covered cells must be
-  incident to at least one inequality.
+  king-neighbour inequalities. Every covered cell must be incident to at least
+  one inequality.
 
 The generalized scope strictly contains the cell-disjoint scope.
+
+## Constructive 18-cell search
+
+`thermo-18c-seed-harvest` builds generalized saturated 18-cell states from the
+project's own frozen `9+8+2` search corpus. It independently enumerates every
+parent solution, deletes one covered cell, saturates the remaining footprint,
+canonicalizes the Hasse relation under D4 and digit complement, and exact-counts
+each distinct network below a declared ceiling.
+
+The completed independent seed harvest classified 17,597 canonical networks
+at cap 1,024. It retained 71 exact low-count seeds; the best has 128 solutions.
+Two deterministic beam rounds then generated 9,240 and 12,458 new canonical
+networks. Complete recounts to cap 4,096 found best new counts of 518 and 560,
+respectively; neither round improved the incumbent.
+
+The all-solutions saturated radius-one neighbourhoods of all 71 frozen seeds
+and all 138 exact generated states in the round-two archive are also complete.
+Their combined union contains 136,912 canonical networks; none is unique or
+has fewer than 128 solutions. Separately, the complete solution-preserving
+exact two-cell exchange shell around the 128-solution seed contains 155,190
+canonical networks, every one of which has at least 129 solutions.
+
+The frozen-seed sweep exposed the only two strict descents not already in the
+beam-generated root set: 605 to 410 solutions and 514 to 304. Their complete
+all-solution radius-one neighbourhoods were then classified to cap 129. Both
+neighbourhoods contain no child below 129, so neither continues the descent
+past the 128-solution incumbent.
+
+No unique puzzle was found. These are constructive searches and exact local
+closures, not an exhaustive 18-cell result. See the
+[seed-harvest method and retained corpus](analysis/18c-seed-harvest.md) and the
+[beam-round method and results](analysis/18c-beam-search.md). The exact local
+results and their retained summaries are documented in the
+[root-neighbourhood method](analysis/18c-root-neighborhood.md) and
+[two-cell shell method](analysis/18c-root-two-cell-shell.md).
 
 ## Exact 17-cell method
 
