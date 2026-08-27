@@ -1,0 +1,1447 @@
+{
+  "schema": "thermo-18c-generated138-radius1-summary-v1",
+  "status": "complete",
+  "scope": {
+    "included": "complete saturated radius-one neighborhoods of all 138 exact round-two landscape records whose historical origin kind is generated",
+    "excluded": [
+      "frozen-seed roots except where rediscovered as neighbors",
+      "all radius-one neighborhoods outside these 138 roots",
+      "two-cell exchanges",
+      "global 18-cell exhaustion"
+    ],
+    "classification_caps": {
+      "historical_11": 4096,
+      "new_127": 129
+    },
+    "cap_interpretation": "direct cap hits are lower bounds; exact external-root and frozen-seed replay-cache counts retain their independent replay caps"
+  },
+  "provenance": {
+    "artifact_schema": "thermo-18c-root-neighborhood-v2",
+    "algorithm_revision": "pinned-external-exact-record-replay-all-solutions-radius1-saturated-hasse-dedupe-v1",
+    "mode": "external-exact-root-all-solutions-radius-one",
+    "round_two_landscape": {
+      "bytes": 64925329,
+      "sha256": "d1b080f52243775fba5446c0a84c0dfd6a14b705f16b471e57820f433922763a",
+      "schema": "thermo-18c-beam-v2",
+      "algorithm_revision": "strict-round1-continuation-w16-q8-signature-diverse-balanced-retarget-radius1-v1",
+      "selection": "every top-level network record with score.exact=true and historical_representative_origin.kind=generated"
+    },
+    "seed_artifact": {
+      "bytes": 124417,
+      "sha256": "8e6a11d7d7e7f51dd497e64ca6d9ed7ae492b42fea60d46bb2aeded51f2bf99e"
+    },
+    "binary_cohorts": [
+      {
+        "classification_cap": 4096,
+        "artifacts": 11,
+        "bytes": 869888,
+        "sha256": "f3af593a95379b6d1e5e98a56a200723878c27151d9d0047a0e70cb3bcf570d3"
+      },
+      {
+        "classification_cap": 129,
+        "artifacts": 127,
+        "bytes": 937472,
+        "sha256": "93346cce167b9b30a19c1a8a79a0b93df640e0bc29113de3fc849d608a4761d6"
+      }
+    ],
+    "audit_checks": [
+      "strict JSON parsing with duplicate-key rejection",
+      "one-to-one authenticated source-line, exact score, root Hasse, target, count, and state binding",
+      "ordered unique root-solution records and per-grid witness hashes",
+      "every emitted canonical Hasse-key hash and representative-state hash",
+      "classification source, cap relation, cache identity, and exact-score consistency across memberships",
+      "raw-move, rejection, accepted-observation, deduplication, occurrence, and solver-call conservation",
+      "terminal generation and classification completeness"
+    ],
+    "audit_boundary": "the audit did not independently rerun the Sudoku solver or reconstruct every representative origin; it verified the complete recorded identities, classifications, and conservation evidence"
+  },
+  "coverage": {
+    "landscape_exact_generated_records": 138,
+    "artifacts": 138,
+    "historical_cap4096_artifacts": 11,
+    "new_cap129_artifacts": 127,
+    "source_lines_unique": true,
+    "source_records_exactly_covered_once": true,
+    "root_networks_unique": true
+  },
+  "enumeration": {
+    "root_solutions": 373022,
+    "moves_per_target": 1135,
+    "move_definition": "one same-footprint retarget plus all 18 removed root cells times all 63 outside cells",
+    "raw_attempt_formula": "373022 * 1135",
+    "raw_attempts": 423379970
+  },
+  "aggregate": {
+    "bytes": 1235267355,
+    "records": 489004,
+    "root_solutions": 373022,
+    "raw_attempts": 423379970,
+    "radius_rejections": 209014029,
+    "coverage_rejections": 7933793,
+    "accepted_observations": 206432148,
+    "duplicate_observations_within_artifacts": 206316442,
+    "artifact_key_instances": 115706,
+    "exact_key_instances": 394,
+    "lower_bound_key_instances": 115312,
+    "external_root_cache_hits": 138,
+    "frozen_seed_cache_hits": 132,
+    "direct_count_calls": 115436,
+    "solver": {
+      "calls": 125510,
+      "nodes": 110829419,
+      "branches": 56227138,
+      "propagation_rounds": 1700824491,
+      "comparison_revisions": 19830061
+    }
+  },
+  "global_union_within_scope": {
+    "distinct_canonical_keys": 91941,
+    "cross_artifact_duplicate_key_instances": 23765,
+    "membership_histogram": {
+      "1": 75078,
+      "2": 14089,
+      "3": 1637,
+      "4": 517,
+      "5": 133,
+      "6": 77,
+      "7": 15,
+      "8": 60,
+      "9": 85,
+      "10": 59,
+      "11": 71,
+      "12": 45,
+      "13": 29,
+      "14": 7,
+      "15": 16,
+      "16": 23
+    },
+    "exact_keys": 168,
+    "lower_bound_keys": 91773,
+    "minimum_exact_count": 128,
+    "exact_keys_below_128": 0,
+    "unique_keys": 0,
+    "score_consistent_across_memberships": true
+  },
+  "exact_classification_evidence": {
+    "external_root_replay_cache": {
+      "instances": 138,
+      "distinct_keys": 138
+    },
+    "frozen_seed_replay_cache": {
+      "instances": 132,
+      "distinct_keys": 20
+    },
+    "direct_exact_counts": {
+      "instances": 124,
+      "distinct_keys": 82
+    },
+    "direct_exact_keys_also_external_roots": 72,
+    "direct_exact_keys_also_frozen_seed_cache": 0,
+    "external_root_and_frozen_seed_key_overlap": 0
+  },
+  "root_relative_structure": {
+    "improvement_instances": 137,
+    "roots_with_at_least_one_exact_lower_neighbor": 131,
+    "roots_without_an_exact_lower_neighbor_in_their_declared_radius_one_artifact": 7,
+    "distinct_exact_improvement_keys": 23,
+    "minimum_exact_child_count": 128,
+    "directed_generated_root_crosslinks": 1033,
+    "source_roots_with_generated_root_crosslinks": 135,
+    "generated_roots_observed_from_another_generated_root": 135
+  },
+  "union_with_frozen71_radius_one": {
+    "frozen71_distinct_keys": 47949,
+    "generated138_distinct_keys": 91941,
+    "overlap_keys": 2978,
+    "generated138_new_keys": 88963,
+    "combined_distinct_keys": 136912,
+    "overlap_keys_exact_in_generated138": 155,
+    "overlap_keys_exact_in_frozen71": 182,
+    "overlap_keys_exact_in_both": 155,
+    "combined_exact_keys": 552,
+    "combined_lower_bound_keys": 136360,
+    "combined_minimum_exact_count": 128,
+    "combined_unique_keys": 0,
+    "score_consistent_across_cohorts": true
+  },
+  "digests": {
+    "artifact_set": {
+      "sha256": "d2be7757a8520da9387fb5c589868b656ccadc1668a140e46135e57bac5f1ca4",
+      "encoding": "ASCII thermo-18c-radius1-generated138-artifact-set-v1, NUL, then records in authenticated source-line order as source_line:u32be, whole_length:u64be, whole_sha256:raw32; paths and filenames excluded"
+    },
+    "records_2_through_eof_set": {
+      "sha256": "7fdf3d7383a6b3ec2ca8857ff6b7ee0f57bfe29b435db66220531e03974f7d14",
+      "encoding": "ASCII thermo-18c-radius1-generated138-body-set-v1, NUL, then records in authenticated source-line order as source_line:u32be, body_length:u64be, body_sha256:raw32; body is the exact bytes after the first LF; paths and filenames excluded"
+    },
+    "global_canonical_key_set": {
+      "sha256": "8b0f35aaf7ab5cd9b9df279ce3b3aaf483d7abdba51d31c98a7c3911f8ac5658",
+      "encoding": "exact lexicographic Hasse-key order; each key is edge_count:u32le followed by lower:u8,upper:u8 for each edge; no prefix, paths, filenames, or score fields"
+    }
+  },
+  "artifact_rows": {
+    "order": "authenticated round-two source line ascending",
+    "encoding": [
+      "source_line",
+      "artifact_filename",
+      "root_network_sha256",
+      "root_exact_solution_count",
+      "classification_cap",
+      "whole_bytes",
+      "whole_sha256"
+    ],
+    "digest_membership_note": "artifact_filename is informational and is excluded from all three aggregate digest encodings",
+    "rows": [
+      [
+        1112,
+        "18c-root-generated-3343-c503a65e9807-radius1-cap129-v2.jsonl",
+        "c503a65e980742aad6fadbc7957fafb535d6962eefc4e1caa851c1d1c1d85248",
+        3343,
+        129,
+        10232122,
+        "e356c402afb3abe234b6311f770853869c4afb8572fdced184cca944a59ce693"
+      ],
+      [
+        1152,
+        "18c-root-generated-3856-d4944ab7fcb4-radius1-cap129-v2.jsonl",
+        "d4944ab7fcb450da3a1c8297954c5b7d4f7e5873b81a201cabe41af82c80fe10",
+        3856,
+        129,
+        11133367,
+        "9844abe69907cd96c58785b9cfa7f8d32bfc783ca19910c3b85f7b407052ec90"
+      ],
+      [
+        1176,
+        "18c-root-generated-3343-60ee58e90400-radius1-cap129-v2.jsonl",
+        "60ee58e90400849cc224ce92f92f41d6b43158280e4d451e5ffabcad85b446d6",
+        3343,
+        129,
+        10510004,
+        "0ba52a8bb061b72f2f711eca780390825a89f4ee622f8b6a2b4a7f3ed2e46434"
+      ],
+      [
+        1191,
+        "18c-root-generated-3534-bf3f6c6d6b18-radius1-cap129-v2.jsonl",
+        "bf3f6c6d6b1835740261fa83a776dcfc31c7cb9737e23f30669b47b9d847923c",
+        3534,
+        129,
+        10792832,
+        "aed67a59f5df3790f70e1c7d1b8d95e8d8b158b4c1e1e254cac6e6aa736e4f93"
+      ],
+      [
+        1211,
+        "18c-root-generated-3687-79c057a7d78f-radius1-cap129-v2.jsonl",
+        "79c057a7d78fd03e99e7ef40728a8adfb2250ebeb6bbeba7faadf03eba059b16",
+        3687,
+        129,
+        11540798,
+        "5157b0a48d11738097cba81417eb00201c3985da15adb53d77acdd46c9aa9bc5"
+      ],
+      [
+        1212,
+        "18c-root-generated-3754-40833f48e8f0-radius1-cap129-v2.jsonl",
+        "40833f48e8f023f975f23d7586c7af6746164a09550858ba60582936c6a13ba7",
+        3754,
+        129,
+        12065785,
+        "4912fd0759aa20afd51cb57d2a15d42e515c59a7fb7c77c9d1d2aa8d28c9c831"
+      ],
+      [
+        1223,
+        "18c-root-generated-3811-9f76a6b8980f-radius1-cap129-v2.jsonl",
+        "9f76a6b8980f2fb18e439ca4183910c4bece7fadd97e41ed9902505fb7a7da89",
+        3811,
+        129,
+        11678194,
+        "1db3051e9481d9b83a2741941a24965f1db780353240e7916ccf92e76f26def5"
+      ],
+      [
+        1360,
+        "18c-root-generated-3851-3a5064f4c971-radius1-cap129-v2.jsonl",
+        "3a5064f4c97187ef32d8d5f89325dd1875edf8f4241c5e59ba523762ff88d4f2",
+        3851,
+        129,
+        12365017,
+        "1096a016e804fa03cfbfe0ffa6873a70fd9d49031b64cfc111dd649deee9048d"
+      ],
+      [
+        1389,
+        "18c-root-generated-3903-6d2f1eed00cc-radius1-cap129-v2.jsonl",
+        "6d2f1eed00ccb1d240fc52b2f4d29fb11b083bca9c2ea2ecf1e28bb1548757a9",
+        3903,
+        129,
+        12274621,
+        "cc9f53ac19005334e2e1dc3e2658c8ae7145a69c18cf9050a072b8ee2b5f827d"
+      ],
+      [
+        1690,
+        "18c-root-generated-3792-dbbc662c4c9e-radius1-cap129-v2.jsonl",
+        "dbbc662c4c9e6df91c1f1305e02d1682eeb30336bc0456084dc870ecf628158f",
+        3792,
+        129,
+        11878074,
+        "ea2387c7752267cd4c62021c2ec0b51450afd915df5b8067ccd5bb27a3065a9a"
+      ],
+      [
+        1692,
+        "18c-root-generated-3545-6cbf73b0e36a-radius1-cap129-v2.jsonl",
+        "6cbf73b0e36a59dc009e787b5e9c5d6e4ea3d44a63d6fa01c0bce042dfc5bcd9",
+        3545,
+        129,
+        11435772,
+        "7369bfc598f0e47b647eb5d3e8fc9ef83722ac3725a59b4333fb87bb53102e58"
+      ],
+      [
+        1717,
+        "18c-root-generated-4041-61135fa67c43-radius1-cap129-v2.jsonl",
+        "61135fa67c430dfa33c46f37aaca610316532a0466bcd95150c71215c8960f03",
+        4041,
+        129,
+        12380382,
+        "ee864f1552258cdfa4b968c6b157b715d26f69bf1d2adb175e23fc23cb4d3be3"
+      ],
+      [
+        1720,
+        "18c-root-generated-3586-b86841048c53-radius1-cap129-v2.jsonl",
+        "b86841048c53fb231e4f284e3f22cd9aca4068ae59e8c81820eecc6db60769eb",
+        3586,
+        129,
+        11337708,
+        "c43ae0146b2c5f34a03c30b57d2ddb49bd72cb28b88e3e5ef9afb4495b2c7369"
+      ],
+      [
+        4932,
+        "18c-root-generated-2844-35a31eb6effe-radius1-cap129-v2.jsonl",
+        "35a31eb6effe7ca1d832c96da9c1c8e19af178448bfd44f8dcc079823980c5ac",
+        2844,
+        129,
+        9239855,
+        "16bf0d0bcf52c886337a15d5aa2c9d5ce3bb0977db11ee1fcb6108ff879b0c9f"
+      ],
+      [
+        5269,
+        "18c-root-generated-2765-fc759f4ee746-radius1-cap129-v2.jsonl",
+        "fc759f4ee746c4abb4295dd58e7b95bb5289ac5c73c92990bd88087f5b29dabf",
+        2765,
+        129,
+        9159631,
+        "ab3e02581c5b6805b0e144742e9b76cf2b95595a5014db04a0be9c1ec1e806ff"
+      ],
+      [
+        5270,
+        "18c-root-generated-2954-1a7af0f33a3f-radius1-cap129-v2.jsonl",
+        "1a7af0f33a3f4eeff2ad0b4be3a9794b4210530ee7dbf89a2e140268f5c85921",
+        2954,
+        129,
+        9758092,
+        "b9f9f08e87c089f7288e46441e045ef28df064b430e53cb10eefd701e19f7518"
+      ],
+      [
+        5793,
+        "18c-root-generated-3440-d33d590b3675-radius1-cap129-v2.jsonl",
+        "d33d590b367539d9bd62d4c6c9522fb4832d25696dbfde6eed0d92dc308c4d47",
+        3440,
+        129,
+        11383073,
+        "dd1922d128d5c8e061ab1060b903f2e0f6547443d4bc22178f5c15cbb540e2a4"
+      ],
+      [
+        5829,
+        "18c-root-generated-3809-1cdea7366e37-radius1-cap129-v2.jsonl",
+        "1cdea7366e37edd891c7902e5af8a4a7dfc09a57922f8c1d6bf85d63947d7e56",
+        3809,
+        129,
+        12828834,
+        "11dcf482cc6e2dae1f4f278b431ad57c21fa5b310c9af56595928273518942ba"
+      ],
+      [
+        5842,
+        "18c-root-generated-4049-e75d9d5ba368-radius1-cap129-v2.jsonl",
+        "e75d9d5ba368b977f23e1f2725d9af707a96d0a52c99f1d76ccf09016bf04760",
+        4049,
+        129,
+        13313778,
+        "57dc988c9576ae70548171972a7f35d5753c95d54ea5ecf183a909036784aec3"
+      ],
+      [
+        6282,
+        "18c-root-generated-3680-eb6bd89e958e-radius1-cap129-v2.jsonl",
+        "eb6bd89e958e4af57b9550e49cb2640363cee20ac2711454b25da55414ea2c5e",
+        3680,
+        129,
+        12286215,
+        "6c9ef23fec11b2e3a976635a632f265d2b1916611af58aafdd98f6af1965cb0f"
+      ],
+      [
+        6412,
+        "18c-root-988-radius1-cap4096-v2.jsonl",
+        "ee45698ec020cab7a849f68d2c37c0e08cbd8923a44346a930fb352ae7a40dbc",
+        988,
+        4096,
+        3518897,
+        "c391427b0119fcc7701dbeed4f59b05cf5d46526f4f561033e45e0ffa32d57da"
+      ],
+      [
+        6414,
+        "18c-root-generated-2124-0632eea341cb-radius1-cap129-v2.jsonl",
+        "0632eea341cbe001480c0332bca20374514abb1c11bc64046f2dde4e6593638b",
+        2124,
+        129,
+        6709527,
+        "8c899c25b623e8540cdef3944f9f94f8e045ae900b946fc361493ae9a3afe565"
+      ],
+      [
+        6491,
+        "18c-root-generated-3237-fb8f13b9cd67-radius1-cap129-v2.jsonl",
+        "fb8f13b9cd67e7409e0184a186b2aab3701d64d3aed6bfee8b53efb13bb21ed4",
+        3237,
+        129,
+        11008633,
+        "836af3c97c2d3ee7d4dfce621f96fc75cad12297a2f4190e21e0da3bda732d37"
+      ],
+      [
+        6496,
+        "18c-root-generated-1552-0050efdef3e7-radius1-cap129-v2.jsonl",
+        "0050efdef3e774ae7a1b9b8d8c93ac28b32a845f3529bcba9719228bd836ecc4",
+        1552,
+        129,
+        5277774,
+        "c2d8483e937b08cce3b9193cbe278cc38584aef16ad68f209b9dfe01913296be"
+      ],
+      [
+        6497,
+        "18c-root-generated-3757-a37b63fb05fa-radius1-cap129-v2.jsonl",
+        "a37b63fb05fa4c53a8f0ecc84f9847f681d0a889015e48bf04575e83bd7aa02c",
+        3757,
+        129,
+        12340201,
+        "8359045136eccf079b2437791437e3f4cf2bf469412a46332b77da7761cb1be1"
+      ],
+      [
+        6501,
+        "18c-root-1317-radius1-cap4096-v2.jsonl",
+        "a7494adfe45cda115f1e40e9de7adde6d4792a939fbeb81625338d53ba1386e1",
+        1317,
+        4096,
+        4514513,
+        "7d1979e047522b6cb468feba06b21e63de444ad33cbe9bfc7076b17f054901ef"
+      ],
+      [
+        6502,
+        "18c-root-generated-2906-12aafe9251cf-radius1-cap129-v2.jsonl",
+        "12aafe9251cf5f7de421ab1ee46c16bd7e906aabfdf9f451faf1feacf094f51e",
+        2906,
+        129,
+        10326863,
+        "8ad15a3890c687a99ea41ab951fcf9a7f88cd31db05ad001ed629c0c1f5ecc87"
+      ],
+      [
+        6503,
+        "18c-root-560-radius1-cap4096-v2.jsonl",
+        "9c7213a6b17d41ad74b5c3ef33b92af58f9da754f770a4e20277c1d9661996aa",
+        560,
+        4096,
+        2575241,
+        "a17a1e2d10b788c95023dbaadf0bcb4821b39dc701a1045de400265790286929"
+      ],
+      [
+        6504,
+        "18c-root-generated-1385-5dc1ed19dfed-radius1-cap129-v2.jsonl",
+        "5dc1ed19dfed5669ec08cb0c77711fa49c0ef0a147a410b3733a5a1d965c94e5",
+        1385,
+        129,
+        4785271,
+        "3babc0ff1af3dc8c8950ae984cec7870a4a788b6610eff68a9da2c9d982a8bb3"
+      ],
+      [
+        6505,
+        "18c-root-generated-2828-d3d98c61c97c-radius1-cap129-v2.jsonl",
+        "d3d98c61c97cf415a53907e09653e52bc67875c407ecbe9d61fd1d4411f70797",
+        2828,
+        129,
+        10124567,
+        "ad016aa7e399207ee0b80fa8882f008eecd9257bee927901b005fcee5016a22f"
+      ],
+      [
+        6517,
+        "18c-root-generated-2800-fcbc68634bf8-radius1-cap129-v2.jsonl",
+        "fcbc68634bf856fae6e42b212ad7a90e827451639dfc6e762613e26005956ec1",
+        2800,
+        129,
+        9336084,
+        "bba874a396cb959622c03fa8cca42a82a3c40d3c1ced4827e24f659d2034d84f"
+      ],
+      [
+        6523,
+        "18c-root-generated-2261-541a694b4957-radius1-cap129-v2.jsonl",
+        "541a694b4957f8b323b08e82ffc68800bf80795f9191f5cefbf8c7c17189c232",
+        2261,
+        129,
+        7444467,
+        "342c8453dd7d99730c10997229f7774d70b7d4567d9db9cb53a97da44c76fd54"
+      ],
+      [
+        6675,
+        "18c-root-generated-1810-2d9c3f2a2174-radius1-cap129-v2.jsonl",
+        "2d9c3f2a217409b9557b43d0c711e640bcd619c887266e4030fba3a579ac31b6",
+        1810,
+        129,
+        6002540,
+        "e8c1fa75c1165b35d34cf1409096b2f04c91835abb11e2c7602f59bff5fac628"
+      ],
+      [
+        6679,
+        "18c-root-generated-1615-09e246c689b0-radius1-cap129-v2.jsonl",
+        "09e246c689b039457b271cd601b56e61ebf5dabff973a47287e760dc484cf37f",
+        1615,
+        129,
+        5404000,
+        "96e9ecce624ebf04b4a09572bcd29ccd492add5bf034aa293e636740cde7b05d"
+      ],
+      [
+        7263,
+        "18c-root-generated-2970-fdd618366612-radius1-cap129-v2.jsonl",
+        "fdd61836661227e4a9098f76aa4f08d014237b94da28c0c39643710c3fe01532",
+        2970,
+        129,
+        9501060,
+        "9cc718e5273d2534876043e983dc7b2f6e34cb8822f856b05059f52dfd55c03d"
+      ],
+      [
+        7264,
+        "18c-root-generated-3068-75e15111d27d-radius1-cap129-v2.jsonl",
+        "75e15111d27d1f857a69f8ab8677406ff42f902218a1ec7dbad25f91eb1a0b66",
+        3068,
+        129,
+        9194249,
+        "06dc204934e2c10da8e8dde2920c402742d735ef6e25a78c4c306a88729477f9"
+      ],
+      [
+        7266,
+        "18c-root-generated-3382-00b3f8e8612a-radius1-cap129-v2.jsonl",
+        "00b3f8e8612ab17be242d4d19d4c1b0ec20e3b9ab69832eb08cdf529caf4db62",
+        3382,
+        129,
+        10677326,
+        "20597a3db18c6ca82188fede41f291db628f1665c3b5df548f1f1e2d3f02ee8e"
+      ],
+      [
+        7267,
+        "18c-root-generated-3985-1d30b3550a02-radius1-cap129-v2.jsonl",
+        "1d30b3550a02b37443ed2fd0ae4cc267fb70ca887e2b4942fb758daa59d97665",
+        3985,
+        129,
+        12974100,
+        "e9009f20cec722afc4bef770e09fd7fd75981fb1dc026e0de65c0d067a7b18a3"
+      ],
+      [
+        7276,
+        "18c-root-generated-2589-073dc2d1f641-radius1-cap129-v2.jsonl",
+        "073dc2d1f6411eb0e8f1aa7aab2ef4d7013bfdf39a4cc38e8620b9806f72f09f",
+        2589,
+        129,
+        7683308,
+        "26090f22db3b75f1017c528154071512bc86c4dfecd7e3062da61dd2e18e8a33"
+      ],
+      [
+        7892,
+        "18c-root-generated-3894-edc6710a6b80-radius1-cap129-v2.jsonl",
+        "edc6710a6b805b1e9cecbef069e0626d02e09c0619b06beb798d56536fe4654f",
+        3894,
+        129,
+        13359661,
+        "cab5b79b2f7d0870df313c676b234a8a9d1d90cd6b7db951acdeb6fc8008de80"
+      ],
+      [
+        7897,
+        "18c-root-generated-3944-b57b463cb0d3-radius1-cap129-v2.jsonl",
+        "b57b463cb0d323f885acf40d8a4c0c8d6efee44cd8ad498dc452bff832288954",
+        3944,
+        129,
+        13507449,
+        "d1f7310649d48f2ba3b19cafe4bbd0260419e0bb3269c12f18059aa02f0ce3a9"
+      ],
+      [
+        8671,
+        "18c-root-generated-2580-070f68fed9a2-radius1-cap129-v2.jsonl",
+        "070f68fed9a2dfaab7021b88c6c83fd6da534a0b43f47ed9492bbd43e23880f1",
+        2580,
+        129,
+        7807472,
+        "b2066714ba061d3e8d04caf1a00e25c9ae4244a03eec87ec01ff5353f9dbecc3"
+      ],
+      [
+        8672,
+        "18c-root-generated-1615-d15530196d0e-radius1-cap129-v2.jsonl",
+        "d15530196d0eb7f19e2765a4ee4c3c9827b042f135613e04b30edbce08846b59",
+        1615,
+        129,
+        5202371,
+        "5755ecf73782005c1cc89afd01026cfa01691ad6ad4ff7d71950147c708db3c4"
+      ],
+      [
+        8681,
+        "18c-root-generated-3053-53747c8222d0-radius1-cap129-v2.jsonl",
+        "53747c8222d02ade3bc42d238498cd50088330fc4df1dd9ee3ad771c078cf50d",
+        3053,
+        129,
+        8939002,
+        "ab3971afebcdaeeed2896bb9306454271af1f9782f53979a343b6e41213a0c58"
+      ],
+      [
+        8684,
+        "18c-root-generated-2418-b939358f8733-radius1-cap129-v2.jsonl",
+        "b939358f87338ff45c337c7e0eaaec77a184af9c5275585fc7fffdc939275d94",
+        2418,
+        129,
+        7274908,
+        "98872905510c01b19631a03fafcd2f4a9c237f3a83b9ee9273b5afb4d6c7f91f"
+      ],
+      [
+        10244,
+        "18c-root-generated-4072-f46cec72741e-radius1-cap129-v2.jsonl",
+        "f46cec72741e28588cd1657aafebe05817b2b3c26256793f68033a79610843c2",
+        4072,
+        129,
+        13620107,
+        "10b793283265ba812fa88a1aab098b9363465f045a85baedf0f3a0761eea54d9"
+      ],
+      [
+        10429,
+        "18c-root-936-radius1-cap4096-v2.jsonl",
+        "587fa6946f1506c971b7aab742bbd76939b6037ba68eb06bf4f2be694e0f5fa4",
+        936,
+        4096,
+        3310856,
+        "447b7f4361b64abbb88792a023bb248d1e0eff4600af77bb6093fa33494dfe58"
+      ],
+      [
+        10430,
+        "18c-root-generated-2674-63397ea15e81-radius1-cap129-v2.jsonl",
+        "63397ea15e816ba03535c1f8b788296825e23071cda28c1bc1303c9205f64400",
+        2674,
+        129,
+        8139827,
+        "fffdf0f7dfef2773584da04eedc3cfa461516bb6820270d27b4e0c4bbbc0cbaa"
+      ],
+      [
+        10450,
+        "18c-root-generated-1191-d938d9d0a15c-radius1-cap129-v2.jsonl",
+        "d938d9d0a15cf6aaa04b7ae2d42e1a795e6b309f5868798806fc82680b75bdc2",
+        1191,
+        129,
+        4025072,
+        "6dc75de7e49f5cd211cb21fccfb0752423797a6b9dc5639881f2bc323b3fb3fa"
+      ],
+      [
+        10465,
+        "18c-root-generated-1389-b5dddd24a591-radius1-cap129-v2.jsonl",
+        "b5dddd24a591b2a355d11ec99c700a5dcdc1b742f7ee5015f760aed063fb92a5",
+        1389,
+        129,
+        4642671,
+        "6a6359d49d9fb911b9c5e1cd11396b6b7d81cfa282d27c8456a85486a25bcb03"
+      ],
+      [
+        10467,
+        "18c-root-generated-2362-627528458d70-radius1-cap129-v2.jsonl",
+        "627528458d701406bd28294f4a423beae8b37a4b4464b5f0ecfc44d020521880",
+        2362,
+        129,
+        7339188,
+        "8d6f809afa088eeeab8f369fd5947bf65227c0412fd77a37bb91f259ef941948"
+      ],
+      [
+        10477,
+        "18c-root-generated-1425-d6693e218ee6-radius1-cap129-v2.jsonl",
+        "d6693e218ee6c0a56500813b5f4c5496c7ed51a72d65b923eaef5c7694deedcf",
+        1425,
+        129,
+        4481623,
+        "9b204ce08eef6cffdd8ecae5c07410fc25e51c18a181248e1efb722e27dffb83"
+      ],
+      [
+        10504,
+        "18c-root-1121-radius1-cap4096-v2.jsonl",
+        "43251865ceaa1a4434890e0da407dc3decdd866ee8f3055dd0471c3ad503cf75",
+        1121,
+        4096,
+        3819492,
+        "b773121f99a88006e872e479b992db93af3f8c048f6d6aa3506f73c0e7f76d36"
+      ],
+      [
+        10548,
+        "18c-root-generated-4054-9998825d310f-radius1-cap129-v2.jsonl",
+        "9998825d310f1a6dfa2a6c410c95904f1987972702d8c55360b635ea7843da4d",
+        4054,
+        129,
+        13266602,
+        "5fcae2a882a187bc22461db68de14cdf12dfd79aea099abf750359c1919d4b22"
+      ],
+      [
+        10577,
+        "18c-root-generated-3195-de142ce52f66-radius1-cap129-v2.jsonl",
+        "de142ce52f66cf361accb2730140c18f29c4a8d50235acbdc63d7bf819c9d724",
+        3195,
+        129,
+        10885706,
+        "690ac23d579f7bc15eb5a0053c094f59b47efe3bf67759d3ccf4b4825b24d5f0"
+      ],
+      [
+        10611,
+        "18c-root-generated-3052-6b46e05a434c-radius1-cap129-v2.jsonl",
+        "6b46e05a434c8893234176bc30517401e8a5dbe5d8e289d962898785ead3869a",
+        3052,
+        129,
+        9738384,
+        "ffba535f84d26d5eb6201144c7c178cda07ab37dec0b0ac2fe453233f2d11e0d"
+      ],
+      [
+        10618,
+        "18c-root-1057-radius1-cap4096-v2.jsonl",
+        "3ea97039d3cbc782e160c9ca0ae900c55e025da64e6d9fc1746e8356cbda1aa0",
+        1057,
+        4096,
+        3623011,
+        "55345f5f92be6f7604dfb372256a15766fd454f7be5a0cdbdb4cc5637e299373"
+      ],
+      [
+        10619,
+        "18c-root-generated-1685-3ec7708954de-radius1-cap129-v2.jsonl",
+        "3ec7708954de2800f0b1384c7e00adcb2cb718c340206fc1c4dffa0e6149e63f",
+        1685,
+        129,
+        5451670,
+        "65254217ffccb9edb9d7ea7a77440af3521e2bf325b03444d928e24e1e2b784e"
+      ],
+      [
+        10620,
+        "18c-root-generated-2723-58e2e2d8d9fb-radius1-cap129-v2.jsonl",
+        "58e2e2d8d9fbff7ec424921fbbca2aec5244621ee2fef102b63d68d2b8e17845",
+        2723,
+        129,
+        9511645,
+        "e4133428a84d01379e97441625d84429f091372ba0a3df0155a1e59062f82a87"
+      ],
+      [
+        10621,
+        "18c-root-generated-3787-e79123ed565d-radius1-cap129-v2.jsonl",
+        "e79123ed565d05fb635679c869d05f910d99cc96f4a82bd2ff2498457be7da70",
+        3787,
+        129,
+        12120966,
+        "f6ba84d7a8281d3240e1b3c52ee22bebbff7cb5257cc0b3a766fe9cf950eab58"
+      ],
+      [
+        10623,
+        "18c-root-generated-3630-77ed50cc641a-radius1-cap129-v2.jsonl",
+        "77ed50cc641af580e1d7387111ee3a832f9a4cd0b69502d195eeadfe44270f64",
+        3630,
+        129,
+        12225235,
+        "0f108f93b1841cc953099b64553d001f14be5520bb1d3d94ab7e4209ed4eac62"
+      ],
+      [
+        10624,
+        "18c-root-680-radius1-cap4096-v2.jsonl",
+        "ed1f3d226e176b26593e2848a5fe8309f526cb2ccbec0254b9527c2520ba5b5e",
+        680,
+        4096,
+        2835890,
+        "47c82abc9731114c6e083a05292488f4de85b8af0801f01fe45ac531cebbbe38"
+      ],
+      [
+        10625,
+        "18c-root-generated-1718-a5fcb199387e-radius1-cap129-v2.jsonl",
+        "a5fcb199387e4f5201c55148622e8906b0f0d03b58202e2dc2ac09a4c674140d",
+        1718,
+        129,
+        5697138,
+        "249754ec9bfc4a6d7faa61908a89da3fce52e987f2de5cb1990588717ca2ad42"
+      ],
+      [
+        10626,
+        "18c-root-generated-2757-3b05a74ac7ca-radius1-cap129-v2.jsonl",
+        "3b05a74ac7caa22a133bded3adffaee7c3dc8acceea33b71fca8b1022e94b5c0",
+        2757,
+        129,
+        8877855,
+        "48f4e60db3c189dbe8339af41969b9b35768e147831116b1402b2b51e5b2c1a4"
+      ],
+      [
+        10627,
+        "18c-root-generated-2608-8e0d5ffc3503-radius1-cap129-v2.jsonl",
+        "8e0d5ffc35030d78b1f7fa6460c3b66a0cd1ef8f585ce15901f7140b4b08feaa",
+        2608,
+        129,
+        8416992,
+        "5cee0eca2edb1b22c1eb147d05ed5763c4359828a84ac8a4099a6430c4031f45"
+      ],
+      [
+        10628,
+        "18c-root-generated-2854-447241f855e9-radius1-cap129-v2.jsonl",
+        "447241f855e9e23a33b8359fe9faf3149e03cc4013ca4c7e750e354aa2a6f4ec",
+        2854,
+        129,
+        9977966,
+        "d844fafb99da2d7108b442424bb8e3a17bb92e4c40cfd6def28ca059a1ac2835"
+      ],
+      [
+        10629,
+        "18c-root-generated-3641-7cfde81f4a24-radius1-cap129-v2.jsonl",
+        "7cfde81f4a24976d0629a71c50d2cc0cc4404a57c9d4cfc7d770494a570058e6",
+        3641,
+        129,
+        12448265,
+        "77024fd933bb09d84d738fad045ad175eac8818780a0ab09bf1312c68c6e62ad"
+      ],
+      [
+        10649,
+        "18c-root-generated-2524-c1342e91382e-radius1-cap129-v2.jsonl",
+        "c1342e91382e05ceada76b676d851442a52a22b92eef8ce5a389a24d1673c1d7",
+        2524,
+        129,
+        8053445,
+        "bc72f34698e3fab9258de3942a63cd38f816065ff01dc8e20712664f3f58a10c"
+      ],
+      [
+        10653,
+        "18c-root-generated-1366-6d5a563c9e9f-radius1-cap129-v2.jsonl",
+        "6d5a563c9e9f623278ec52aec957a09022cd52650c3c48f6d54629bd10c5954a",
+        1366,
+        129,
+        4828930,
+        "b7e307bf857481b5e70da3dc58162cc0b1a57ebd8dc88a813f580202971e9543"
+      ],
+      [
+        10659,
+        "18c-root-generated-2802-4f0b033af869-radius1-cap129-v2.jsonl",
+        "4f0b033af86999b6994a56264c382da0e9c93166ff73455010be509b6b2a75e6",
+        2802,
+        129,
+        8797916,
+        "edf02565071586a55d76d44046827215f53769eb2c7b77b94b5c24352dabefff"
+      ],
+      [
+        10662,
+        "18c-root-generated-1410-6432d712791a-radius1-cap129-v2.jsonl",
+        "6432d712791af80f7980f973b5fae86ee11102465d44fed7e7c7de28964eb41c",
+        1410,
+        129,
+        5039301,
+        "9e1d34b2e2e82e6da08f3bd591f46cdd7d411322bcc56f0745432e03dc54f9cd"
+      ],
+      [
+        10666,
+        "18c-root-generated-2604-1be6095c02e3-radius1-cap129-v2.jsonl",
+        "1be6095c02e3c8de44eafc4ac49b29ad3979843505d7a91ebeb5fc6c0ba99b38",
+        2604,
+        129,
+        8295393,
+        "7f0babd3bec60cc9b1eb5baa6e249813de1bfe4d2d25c9b8fae47dc3b47628bf"
+      ],
+      [
+        10677,
+        "18c-root-generated-1740-53756d46d063-radius1-cap129-v2.jsonl",
+        "53756d46d063877ffd24e94e31fef240b2904226067e12c8295549fee225a1a1",
+        1740,
+        129,
+        5721937,
+        "447eabe1cc1a65ab9dff67bb380532a057f04f1ddb6b3b435a73294ef4ca5705"
+      ],
+      [
+        10694,
+        "18c-root-generated-2866-613a1ad37174-radius1-cap129-v2.jsonl",
+        "613a1ad371748dc7f1aa49aef8227ae2a7874d7abe828e5302ac7a49c7b93fdc",
+        2866,
+        129,
+        9807853,
+        "ccfabb24ea7fefe5014876935f562ed3c067837373d858ae5ebaa1daa3eade86"
+      ],
+      [
+        10707,
+        "18c-root-generated-2995-75df7f6bd8be-radius1-cap129-v2.jsonl",
+        "75df7f6bd8be3b042c5500e0272ecf78cdde02bef89275057a413010aa108a0d",
+        2995,
+        129,
+        9566459,
+        "33f3c7da21ac97682d7bb9c138b348b1044aa5b17fd6844c53389fd5a6d24180"
+      ],
+      [
+        10721,
+        "18c-root-generated-2420-f94138a9b9d5-radius1-cap129-v2.jsonl",
+        "f94138a9b9d5de5f75aab1f31fcff91491ec9e0805d487f171cf21cf74fa6129",
+        2420,
+        129,
+        7648493,
+        "eed7d0e645fc9416b61b315039994dfd8481fba44ba86f1c4d721c83b30dbe94"
+      ],
+      [
+        10731,
+        "18c-root-generated-3604-7b95ccf9793b-radius1-cap129-v2.jsonl",
+        "7b95ccf9793b21c7caf2214043321800a4cef08b940462ac7403a815ebc3e0a6",
+        3604,
+        129,
+        12324775,
+        "7567064422d092ce623eb2d9e7f11784cfb73a15e6b5bb33f9cd4417f5f4540a"
+      ],
+      [
+        10760,
+        "18c-root-generated-1314-b06657957225-radius1-cap129-v2.jsonl",
+        "b06657957225e1ff6d5153a75c1e1b05b0a8dfbb66b93a2f09bf61cebe03948d",
+        1314,
+        129,
+        4663149,
+        "4a24ccd1fc3dd3eff6b8eb69b8519928ae7a378345fe9d1492f8f638ac0a5b45"
+      ],
+      [
+        10766,
+        "18c-root-generated-2756-242528aaa7c4-radius1-cap129-v2.jsonl",
+        "242528aaa7c44e93eb00e2713ac642efecd8de69e897ffd494947e26c81081f8",
+        2756,
+        129,
+        8659421,
+        "f0df0ba672cd4aff0428575c86ec4f1a2d8d13e133d4f5b34a0300625b9768f1"
+      ],
+      [
+        11205,
+        "18c-root-generated-3092-bc6adecfb816-radius1-cap129-v2.jsonl",
+        "bc6adecfb81684135d08843157bb06bfe88800cf92369c0aac28e6708c0cd979",
+        3092,
+        129,
+        9714671,
+        "9a8cef53a39bd07ca088d79f58ed1366f69dd9a379a30486bffe76538d9d69f7"
+      ],
+      [
+        11210,
+        "18c-root-generated-2813-f4e7f3538f26-radius1-cap129-v2.jsonl",
+        "f4e7f3538f260fd6ca4dc112b22dfd2f9be524bc66827fd181d316d2520fb1d7",
+        2813,
+        129,
+        8471622,
+        "aa2dbc1074016130df75c3bf27756a0f95400dd993d74a4cfd7ae4864a21065f"
+      ],
+      [
+        12208,
+        "18c-root-generated-3972-7ed86e8bd811-radius1-cap129-v2.jsonl",
+        "7ed86e8bd8110baa6346a3510be04200f400a6354258514a43943add5d48f499",
+        3972,
+        129,
+        13331346,
+        "6dfa42dba50c257e04996affea441c7f783f80bd97a4f7c5f7cb8fde24f8f5da"
+      ],
+      [
+        12261,
+        "18c-root-generated-3424-e0e91aae0751-radius1-cap129-v2.jsonl",
+        "e0e91aae07515d8f41d5f20cfe6c9ec389ebbfb30b2cc87754a554d468f11f29",
+        3424,
+        129,
+        11576062,
+        "d28f80ff4b78561a15a13ae7058a3285e26e4fec143c648091de7912ed3dcd07"
+      ],
+      [
+        12262,
+        "18c-root-generated-3541-c96ef0ad2d99-radius1-cap129-v2.jsonl",
+        "c96ef0ad2d99416f0b1f3f03d57a2509035e3f57c7522dd05c853f5c3a438894",
+        3541,
+        129,
+        11962618,
+        "d8299ee7f5bdd4abba515b0ae1e9efef0f41afbd3b9f22f32fa33e7628d62607"
+      ],
+      [
+        12909,
+        "18c-root-948-radius1-cap4096-v2.jsonl",
+        "96826f9a29ceb1c3c0be5475464bc1bea5d57f4fe6020970fa83b064925602ee",
+        948,
+        4096,
+        3457293,
+        "be0ea14d52bad2de42a7a3b598d316ad196811bae79e303ac5e60e3cf730a8fe"
+      ],
+      [
+        12914,
+        "18c-root-1141-radius1-cap4096-v2.jsonl",
+        "8c684437a9c6bde0d5d71e9b11a986ace081eb66501dfdf105ea49cf0a0666c4",
+        1141,
+        4096,
+        4046147,
+        "66cb0ddc99b58fadd53fb08c207c73d7a9c2a9461485fac60289336dc9d849e1"
+      ],
+      [
+        12984,
+        "18c-root-generated-3218-e4e1a23513b8-radius1-cap129-v2.jsonl",
+        "e4e1a23513b8fb292e852baa91fdad0645100adad1fe8ea40fc9ec00a84003b2",
+        3218,
+        129,
+        11121331,
+        "e2d38961629838f793260920f35069775e353bf990082d5f8c40abe6dae98022"
+      ],
+      [
+        12987,
+        "18c-root-generated-3320-397cc3a114e9-radius1-cap129-v2.jsonl",
+        "397cc3a114e9c364bbca0bc7768f0f0604aa08325fc412654fb87c6fa9f5dcda",
+        3320,
+        129,
+        11951723,
+        "b017c2aa9fc7692a1f052ad0118f1a48da68cc0d9f8ef6c44e11258ec9c27eae"
+      ],
+      [
+        12988,
+        "18c-root-generated-3593-05c88d19e29a-radius1-cap129-v2.jsonl",
+        "05c88d19e29a303ac046e7454d84e6abb10de44cb7c9e94c36c90c1cb2184288",
+        3593,
+        129,
+        12896666,
+        "b5970234f94429449a07c4599ee47d390397675a2fa77b8157efeca4b9e0c5c2"
+      ],
+      [
+        12989,
+        "18c-root-generated-1562-d67bf24bb417-radius1-cap129-v2.jsonl",
+        "d67bf24bb417a02c0cd85e4f1a08e12f7175fad6e07102a2d57c622a319ca1a8",
+        1562,
+        129,
+        5403561,
+        "bdfe235c0fe565e80773e95e8a843fb5fe785ae0eed81d327aa84bd51bb8d31f"
+      ],
+      [
+        12990,
+        "18c-root-generated-3717-a43f6bcdc545-radius1-cap129-v2.jsonl",
+        "a43f6bcdc54507221ad6a1f7c68764beb208906446c59b6c811233e01d498c43",
+        3717,
+        129,
+        12441163,
+        "10e006bb1c7ed62c41d5c932574931ae79693ffcb0064b3798e309df45a42e8f"
+      ],
+      [
+        12994,
+        "18c-root-generated-1801-6837b7f8a10f-radius1-cap129-v2.jsonl",
+        "6837b7f8a10f58bb8398a022c8bd7c915b50baa93d64777d415d66beaff938cb",
+        1801,
+        129,
+        6109878,
+        "f7f7fe3da93a9111a6c496084101bed671f95f649162fdd49dc95805d3319298"
+      ],
+      [
+        12995,
+        "18c-root-generated-2343-f7bddebce18e-radius1-cap129-v2.jsonl",
+        "f7bddebce18e6ffab7f2c3156c59a055cd73604c670f9a7ffb7dc5514790b7c3",
+        2343,
+        129,
+        7821492,
+        "383e50263f49c77ae68b9d09bc53c409aa582ea6465138d49505d9366eb513e0"
+      ],
+      [
+        12996,
+        "18c-root-generated-2919-2d7bc4a8cee2-radius1-cap129-v2.jsonl",
+        "2d7bc4a8cee2cd695410d1dbc0085e257beabf206701711ac37ece495017fc59",
+        2919,
+        129,
+        10549118,
+        "57324923982db478b0a99185f2ea7c76385fdfca30442839ba7ce0a3d2217b72"
+      ],
+      [
+        12997,
+        "18c-root-generated-3512-74914c641c8f-radius1-cap129-v2.jsonl",
+        "74914c641c8f0e7520ed2db5eccc0a225ec26fa4128b5b052f0bf4cc31042111",
+        3512,
+        129,
+        12420661,
+        "bc4b2072f512c8ff737c94c22d2aef084eca1920d5f42adc0958561974aea125"
+      ],
+      [
+        12998,
+        "18c-root-generated-1875-8cbe4cf6c7db-radius1-cap129-v2.jsonl",
+        "8cbe4cf6c7dbd5ed92abed7cffc2f87625c46e08dc9f5aadf99ff6d8e457cd16",
+        1875,
+        129,
+        6793564,
+        "4350542bd1f34cee5d9bbdde7e59c016c2028ef7466cc152d60d660f50ea1674"
+      ],
+      [
+        12999,
+        "18c-root-generated-2666-4d7e03f46856-radius1-cap129-v2.jsonl",
+        "4d7e03f468568b1118c22bfeb20610ccdc2aa1db016786cdac077c90a4071cdb",
+        2666,
+        129,
+        9705630,
+        "bdee90caf83bacb8c65a1e504378fc2975566c9177fdf5dbfc47272742ced642"
+      ],
+      [
+        13010,
+        "18c-root-generated-2758-f3bb960e55b0-radius1-cap129-v2.jsonl",
+        "f3bb960e55b0889b35e6c11b056157c38182267a95aa5fd596125322dc97b882",
+        2758,
+        129,
+        9157600,
+        "1e37012de5b1c84746ef3cddfaad630d40769a0d482c777765ca7a64615458e8"
+      ],
+      [
+        13014,
+        "18c-root-generated-2171-d31fdc18d0ef-radius1-cap129-v2.jsonl",
+        "d31fdc18d0ef31abf48dc803f84c7280ac8c8222260859cd3b3c7508bad00b2b",
+        2171,
+        129,
+        7823884,
+        "1086056b353e4c99ef455c2b3f65f3b4eded8a7f453d0e46ba993c137491b0ec"
+      ],
+      [
+        13018,
+        "18c-root-generated-2620-51015f8786a3-radius1-cap129-v2.jsonl",
+        "51015f8786a3df03e978211cd07fea8430f4eacabd617c41dc89df4337492c32",
+        2620,
+        129,
+        8717901,
+        "62302c63e8aa5e2de437ffaf963260d05a99c49e569184a421702f614a6f57ad"
+      ],
+      [
+        13183,
+        "18c-root-generated-2051-b7376062524b-radius1-cap129-v2.jsonl",
+        "b7376062524bc77327533a164cfcd1d173cecf8a485808c6e85621d709821e6e",
+        2051,
+        129,
+        6922751,
+        "af9e7268fa1250562534ef910f1525981c40d48c8105b218076e16bbcc85d495"
+      ],
+      [
+        13895,
+        "18c-root-generated-3668-a2120af38e21-radius1-cap129-v2.jsonl",
+        "a2120af38e211ba8446ea3af65eed36f97b39fea742fcfb9728b3a58d49492c0",
+        3668,
+        129,
+        12012478,
+        "f6f1fb39429638fc4c29f471fa46dd63634226ec6cb41f39f1868841cba7a4be"
+      ],
+      [
+        13896,
+        "18c-root-generated-3944-473ed9196220-radius1-cap129-v2.jsonl",
+        "473ed9196220421e26c13f9e13c0b83fd20f603bfabb85a39b3fc55a38e4443c",
+        3944,
+        129,
+        12784511,
+        "2267f444aaf47540ee7b1048f39096ffb5f940ccb11019fce9e036a08af5ed19"
+      ],
+      [
+        13898,
+        "18c-root-generated-3842-e798c9de7bc2-radius1-cap129-v2.jsonl",
+        "e798c9de7bc22bda4637bb34e8685592779fd06e2dc2ea2d914dd6721e71f732",
+        3842,
+        129,
+        12560792,
+        "6a22047a131d92c07cee54f4c62eb2974fc6dbf16de88bac89b0a826dcadbfd2"
+      ],
+      [
+        15212,
+        "18c-root-generated-4016-f69fa99dd797-radius1-cap129-v2.jsonl",
+        "f69fa99dd797bbf4e4f7ee9ea463b57a124f2ab4fc3eedc98161da037b6ec287",
+        4016,
+        129,
+        13710801,
+        "020523c6878f4ffd0bf50d5caec87dc7d83982c098a06510f77653d1e4a84fee"
+      ],
+      [
+        15358,
+        "18c-root-869-radius1-cap4096-v2.jsonl",
+        "71be7a992e504f96536beccddd607f3529027fda2baf51d087c7089365592397",
+        869,
+        4096,
+        3173936,
+        "d0d774b0be58ce420f44871b946e39e1c429ca97ea48fb4ab61a9b480ee44df3"
+      ],
+      [
+        15378,
+        "18c-root-generated-1121-42c4f9ed9115-radius1-cap129-v2.jsonl",
+        "42c4f9ed9115a5983c40efadfd3399e822d5e66c332d7bb7a5dcf3a76ac5c105",
+        1121,
+        129,
+        3882097,
+        "d8d63d4366606f8483d52d9efb10464086fdd374197b7d4082d51667969c9f1b"
+      ],
+      [
+        15379,
+        "18c-root-generated-1322-585db8b581a6-radius1-cap129-v2.jsonl",
+        "585db8b581a64a299642b2b31c200e7d6b7a68c3ffa7e3f2c5a9ee283bec03b2",
+        1322,
+        129,
+        4504530,
+        "b2054f7b33e6afe9f4d6e5c59493e8cec81921f90925ed45fad1453c6cb2a52a"
+      ],
+      [
+        15394,
+        "18c-root-1304-radius1-cap4096-v2.jsonl",
+        "1b8cea197b2d2d2fbf5029518a9022da121d8d239291e1458326691284a9d7d3",
+        1304,
+        4096,
+        4456119,
+        "d290210ceb402744085cdf58b37c7852cf928c60086f4e375030af17b5c8911b"
+      ],
+      [
+        15471,
+        "18c-root-generated-4019-cd47171f02b9-radius1-cap129-v2.jsonl",
+        "cd47171f02b99f3b91ac0928cc4da5220b56c91321847e18b473c00ee955a44d",
+        4019,
+        129,
+        13437998,
+        "e3deae517c8d51ddbd7f5cf527bc68678b7c13f28b04a748424c506deb82fa5b"
+      ],
+      [
+        15472,
+        "18c-root-generated-4054-69a421fa2c14-radius1-cap129-v2.jsonl",
+        "69a421fa2c14c5f07b05dba5278264887afa8493a2561bfe3464645feda106de",
+        4054,
+        129,
+        13573231,
+        "4fe4ae72ad41b0258eb1210254b129aacbc8cc208a28bf4cf4875ec96e795142"
+      ],
+      [
+        15473,
+        "18c-root-generated-4081-e5bd6a16b03e-radius1-cap129-v2.jsonl",
+        "e5bd6a16b03e2fe2568de140c6d797f179dcba1304c563e05608b59566651089",
+        4081,
+        129,
+        13632714,
+        "3355bfd473e3cf3b535d4282cc16ff056c47cba1f67d9b909482782944e43cd5"
+      ],
+      [
+        15499,
+        "18c-root-generated-3890-f5ca57218ba2-radius1-cap129-v2.jsonl",
+        "f5ca57218ba2d79441133d349abacfae52fb215475c4c5dce3c7195095f3c976",
+        3890,
+        129,
+        13582142,
+        "62e7dd98d3535abc43d6efac65c8a03f25a1555e596d7570f359547dcabc3b21"
+      ],
+      [
+        15500,
+        "18c-root-generated-2309-b76a158e946c-radius1-cap129-v2.jsonl",
+        "b76a158e946c49c3ad9b03daa720d12819f62edefc1a150576eb0ac6d1f3189d",
+        2309,
+        129,
+        8158137,
+        "d4fbfbd0b70ec90fca8e9ca9a9364801359db01181c25fce39f6ea340c0d403f"
+      ],
+      [
+        15501,
+        "18c-root-generated-2065-f5f0d7e71f6b-radius1-cap129-v2.jsonl",
+        "f5f0d7e71f6bbe83105cacf9f4634612bb070e97dd2c478edc4705cf21d467c1",
+        2065,
+        129,
+        7296119,
+        "d8d4713897aa71d921cf08eeb81367c5edad44385f67dc9823bc98950e58850c"
+      ],
+      [
+        15553,
+        "18c-root-generated-3969-1d2574c1ec7c-radius1-cap129-v2.jsonl",
+        "1d2574c1ec7ca0dc72be23cc70bd4d2af7d34f0655e73c4410990d5614286892",
+        3969,
+        129,
+        12871545,
+        "f5e00ed179b8bb95d1bf4e7a36f41eb0596c7ed8c861f4ee62054c9e804f6292"
+      ],
+      [
+        15555,
+        "18c-root-generated-3173-47d91fb05e10-radius1-cap129-v2.jsonl",
+        "47d91fb05e10d9afbf02eaa13cd6f23491c43af4ee720f7df9121743beb9f486",
+        3173,
+        129,
+        10344523,
+        "654142bbde4944f46c73bd217cb73e9c83389311e3928760ea92666d9e127a31"
+      ],
+      [
+        15577,
+        "18c-root-generated-2995-20c450cc3d07-radius1-cap129-v2.jsonl",
+        "20c450cc3d07546f11802303a49a862727a3036525c1c025de90356376d4fbd0",
+        2995,
+        129,
+        9801279,
+        "f24a36fc2bf4fb34ad1d02b0661da48ea27a7096fb00e6e877a8c1ad4819be7d"
+      ],
+      [
+        15631,
+        "18c-root-generated-1380-1d638be2d4c9-radius1-cap129-v2.jsonl",
+        "1d638be2d4c99e95b6c5701355d4a1e7a4dff3dc2b99be64d33c49bd916b63df",
+        1380,
+        129,
+        4658079,
+        "e385c2b10740b1cab2f14bb65e94087e32dc6303c9def789ec96bab2f1fdc1a2"
+      ],
+      [
+        15632,
+        "18c-root-generated-2420-e3c1795acf84-radius1-cap129-v2.jsonl",
+        "e3c1795acf848c88585ed739580505e66a75fa09e90d579bac31d76ce0c4d5e4",
+        2420,
+        129,
+        7842477,
+        "ccea71c96d3f013d2a4b75ecdfb72455a1240e8a09a68fcfac7c0e001777ce70"
+      ],
+      [
+        15633,
+        "18c-root-generated-2073-557cd61bd45e-radius1-cap129-v2.jsonl",
+        "557cd61bd45ed3ca7aa9ff168b4ae0faa5a02ac9a901670bc5a2f3cf1e26c362",
+        2073,
+        129,
+        6775657,
+        "7f9e349fa185939e7b172cd623e373863d3f1fbc8e48f251dd5838eac987f741"
+      ],
+      [
+        15634,
+        "18c-root-generated-2432-0cc2c3ed2f9f-radius1-cap129-v2.jsonl",
+        "0cc2c3ed2f9f7da665b41e3ac06629720c9530bee685b47cab7ab63bcc03d7cf",
+        2432,
+        129,
+        8777578,
+        "18b4443c03019e4c1c25e7a02be37552d57f54e69ed5e82bc49e6c1b5f94af3e"
+      ],
+      [
+        15636,
+        "18c-root-generated-3429-9299268aba21-radius1-cap129-v2.jsonl",
+        "9299268aba2114bf8cfd7b08f9d3398dc82072455b39b4718b78541a7ce56762",
+        3429,
+        129,
+        11836916,
+        "d31b996914e6c6fb7a94e8bd29f754e8d8572a6981f75f4743b88b1a27197fc3"
+      ],
+      [
+        15637,
+        "18c-root-generated-3288-48a86d86ac13-radius1-cap129-v2.jsonl",
+        "48a86d86ac13b0061dcb598bef31ac3f1a010878c5b110fc36d2eb51a04f508d",
+        3288,
+        129,
+        11392811,
+        "7db434d3b42670c078e47d4dac1f7d25fb7df4e48b706e57680249f75fbb7c15"
+      ],
+      [
+        15638,
+        "18c-root-generated-2283-2e113332fc5a-radius1-cap129-v2.jsonl",
+        "2e113332fc5aeef28de420662c93298b05c03380b83de74ea474a48b1f54d64c",
+        2283,
+        129,
+        7941858,
+        "0ad448606191c7e5843a71e7229c74f05348e01ece1b56c525602ac9f2c5ebdc"
+      ],
+      [
+        15639,
+        "18c-root-generated-1715-c3044f3aef92-radius1-cap129-v2.jsonl",
+        "c3044f3aef92a115a823bcc776b8e1c5c05112da08510a3c1f9003070abfd15f",
+        1715,
+        129,
+        6093488,
+        "77a61d570d489d5af9271b3618bb44f0277081c76958093fdef5773c2a380d58"
+      ],
+      [
+        15640,
+        "18c-root-generated-1932-e67a3e64e9ea-radius1-cap129-v2.jsonl",
+        "e67a3e64e9eaeb907532f8bc8cec956f7ecdbbdb92d053bf9b2fbed5ac5d5995",
+        1932,
+        129,
+        7026319,
+        "f80c0e8a009d37f7806f6d893afed0fd1357cf260fcb04b6a887e573e91c447c"
+      ],
+      [
+        15654,
+        "18c-root-generated-3062-b725e4e673c1-radius1-cap129-v2.jsonl",
+        "b725e4e673c13599c46f4dacf8486756ffd6707479b6d4f3664e366f2638eb74",
+        3062,
+        129,
+        9853206,
+        "42a132337beb49b9aa336b7aef61f31ccb70e2ced2063845f39eeb7da5702651"
+      ],
+      [
+        15659,
+        "18c-root-generated-1899-c4b4bec86fcd-radius1-cap129-v2.jsonl",
+        "c4b4bec86fcd9870dfa8aec7d5d7dad344589a18a52df3627185a17db14b9189",
+        1899,
+        129,
+        6697520,
+        "578f0ee8a69f31d2875285c3f669fa867e6a36e6284103f863628356e05f3a6d"
+      ],
+      [
+        15665,
+        "18c-root-generated-3086-42c83c350900-radius1-cap129-v2.jsonl",
+        "42c83c3509006a57d3d6f7565b866c50f9150331e07eda925fc9fb0a48184a56",
+        3086,
+        129,
+        9911480,
+        "60da474aa2bd8df3ea833825a4999082021a7c18bcca2c09be502c7b0eee905a"
+      ],
+      [
+        15673,
+        "18c-root-generated-3278-af14813be290-radius1-cap129-v2.jsonl",
+        "af14813be290bfe3c043676e7964760c17fb0b8ed6006c1389291af91dfeab07",
+        3278,
+        129,
+        10498495,
+        "93e59dbdfe2f99161f8a5adc93effa9f6be4e3887d64242d1d43a904e8b4a7e4"
+      ],
+      [
+        15676,
+        "18c-root-generated-2018-9637bc7c27ea-radius1-cap129-v2.jsonl",
+        "9637bc7c27eafd88a1169329c700a0f43c6df50568f1d69c4ee79b80826db54e",
+        2018,
+        129,
+        7116997,
+        "2280b53b2f8250e7f71d5aeffb66f898a5b6c818e9db1808c82044be96e7de87"
+      ],
+      [
+        15680,
+        "18c-root-generated-2804-440861d3dcd6-radius1-cap129-v2.jsonl",
+        "440861d3dcd62aed99437ac00569a4bee1fd90a8cf72dcb5dcdb750a69ce2689",
+        2804,
+        129,
+        9056657,
+        "fe51fee869955ca75f16705d472dc92d495855abbd284d3720ea9f63237fabc5"
+      ],
+      [
+        15990,
+        "18c-root-generated-2538-ffda5c187d90-radius1-cap129-v2.jsonl",
+        "ffda5c187d90ab02aa518936d1fcc716853f475841c0d233afcbce4c9fdc1d38",
+        2538,
+        129,
+        8265508,
+        "4868d748d410da9a28d6ad8701e3879d707f55503cb7ff5454a5a0194082cb85"
+      ],
+      [
+        19006,
+        "18c-root-generated-3052-935413bfc6ea-radius1-cap129-v2.jsonl",
+        "935413bfc6ea632a3c5b74d2bb66914ec72eb1939f291850317f9f7d6d3bb468",
+        3052,
+        129,
+        9727177,
+        "b9d1af111d090793080d6aeb236ce8be6b37ec18323493b196b1902c1ea40295"
+      ],
+      [
+        19010,
+        "18c-root-generated-3195-c782bee4161a-radius1-cap129-v2.jsonl",
+        "c782bee4161a795409fcc88d7d51cf9d88972e5dfa85c3c011e1c8091094b7f0",
+        3195,
+        129,
+        10885967,
+        "20f1dd48c9d0a3fe26f9b96b457149d213187522f077376cf31b69ba8ef8fa21"
+      ],
+      [
+        19011,
+        "18c-root-generated-1685-d91a1c17c2a9-radius1-cap129-v2.jsonl",
+        "d91a1c17c2a92c9146427c0a803ca893887c11c1e8cea82224294538c69b368e",
+        1685,
+        129,
+        5426159,
+        "7d388136b8b90611ec4501948522cc4fc91d558144f7368cc63b6e9aa92a5d57"
+      ],
+      [
+        21079,
+        "18c-root-generated-518-01f8d095a4b6-radius1-cap129-v2.jsonl",
+        "01f8d095a4b63ba1ffd5c848057dd151c9d36b47ffee47480fcb40ece410acb7",
+        518,
+        129,
+        2356501,
+        "358282349450110cab52b70da2c77115c8f8c89db9f22cc3880306cbecec9f7d"
+      ]
+    ]
+  },
+  "conclusion": {
+    "classification_complete": true,
+    "declared_generated_root_neighborhoods": 138,
+    "global_keys_in_declared_union": 91941,
+    "unique_found": false,
+    "exact_count_below_incumbent_128_found": false,
+    "minimum_exact_solution_count": 128,
+    "global_18_cell_conclusion": null
+  }
+}

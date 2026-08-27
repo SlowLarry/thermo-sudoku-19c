@@ -1,0 +1,203 @@
+{
+  "schema": "thermo-18c-descents304-410-radius1-cap129-summary-v1",
+  "status": "audited-complete",
+  "model": {
+    "covered_cells": 18,
+    "constraints": "directed unequal king-neighbour comparisons",
+    "overlap_and_branching": true,
+    "coverage_rule": "all 18 cells incident after target saturation",
+    "identity": "exact canonical Hasse edge vector; SHA-256 is an identifier only"
+  },
+  "executable": {
+    "path": "thermo-sudoku-rs/target/release/thermo-18c-beam.exe",
+    "bytes": 949760,
+    "sha256": "740db604cb743046d809558bf6c1c12f33518bebee9db9fbe54f7ce100b657c3"
+  },
+  "sources": [
+    {
+      "path": "runs/18c-root-seed-2-radius1-cap4096-v1.jsonl",
+      "bytes": 2312384,
+      "sha256": "7200eef43617c2fdd17d981fbdd295d279fe56c17e95ca356a30ce66f0041d7e",
+      "schema": "thermo-18c-root-neighborhood-v1",
+      "algorithm_revision": "strict-seed-replay-exact-root-all-solutions-radius1-saturated-hasse-dedupe-v1",
+      "selected_line": 1039,
+      "selected_network_sha256": "b02c3e9aa72ccb7b21759c397a423384b3c3b28d2bf71db31c40e40d54ae2124",
+      "selected_state_sha256": "5d2e4fa14db7b8e2b32e7914b213656a9307b8301ebfdcd6c204d925f59da716",
+      "selected_exact_solution_count": 304
+    },
+    {
+      "path": "runs/18c-root-seed-1-radius1-cap4096-v1.jsonl",
+      "bytes": 2427311,
+      "sha256": "f87071dbe152bd3b2060a526b26c7160658fdd6b15f4eb08d37fbb5e1b57ad8a",
+      "schema": "thermo-18c-root-neighborhood-v1",
+      "algorithm_revision": "strict-seed-replay-exact-root-all-solutions-radius1-saturated-hasse-dedupe-v1",
+      "selected_line": 1095,
+      "selected_network_sha256": "e46a373d125d86e38639aa279758ab42e00794ca093bbdda92e7babbf3b0fa6f",
+      "selected_state_sha256": "040942150cb57eee79e8195586d34d64fbbea5691e5ca2aa6eacb3f9beb94825",
+      "selected_exact_solution_count": 410
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "runs/18c-root-304-radius1-cap129-v2.jsonl",
+      "bytes": 1731838,
+      "sha256": "9d081cda1efb4cac8864040bb35ec616e377957a102d1e72f6980cf65fc1f751",
+      "records": 1040,
+      "root": {
+        "network_sha256": "b02c3e9aa72ccb7b21759c397a423384b3c3b28d2bf71db31c40e40d54ae2124",
+        "state_sha256": "5d2e4fa14db7b8e2b32e7914b213656a9307b8301ebfdcd6c204d925f59da716",
+        "exact_solution_count": 304,
+        "independent_replay_cap": 305,
+        "ordered_solution_set_sha256": "b4f6e628184f742695e5bbcc008a6402629333e7261dfc30a04178acb4f6a75b"
+      },
+      "generation": {
+        "root_solutions": 304,
+        "moves_per_target": 1135,
+        "raw_attempts": 345040,
+        "radius_rejections": 168720,
+        "coverage_rejections": 2406,
+        "accepted_observations": 173914,
+        "distinct_canonical_networks": 734,
+        "duplicate_observations": 173180,
+        "summed_network_occurrences": 173914,
+        "ordered_key_set_sha256": "61d41720c089b9c548b03a1e49e618e44cc1ab1ec8d6abe72924eb6d2b9ecca3",
+        "generation_invariant_sha256": "e7bf17f3389970a633b0bf8fa22e04348c761001920e622b51bbaef81e9a8d78"
+      },
+      "classification": {
+        "count_cap": 129,
+        "external_root_cache_hits": 1,
+        "frozen_seed_cache_hits": 1,
+        "direct_count_calls": 732,
+        "exact_networks": 2,
+        "lower_bound_networks": 732,
+        "unclassified": 0,
+        "exact_counts": [304, 514],
+        "lower_bound_count": 129,
+        "unique_network_sha256": null
+      },
+      "solver_totals": {
+        "calls": 805,
+        "nodes": 273208,
+        "branches": 141621,
+        "propagation_rounds": 4345408,
+        "comparison_revisions": 78975,
+        "max_depth": 36
+      }
+    },
+    {
+      "path": "runs/18c-root-410-radius1-cap129-v2.jsonl",
+      "bytes": 1980801,
+      "sha256": "5e872ef2867eb79714c6685ccf7cd7bbb3f25c47113a90aaaa2520d570e44b16",
+      "records": 1146,
+      "root": {
+        "network_sha256": "e46a373d125d86e38639aa279758ab42e00794ca093bbdda92e7babbf3b0fa6f",
+        "state_sha256": "040942150cb57eee79e8195586d34d64fbbea5691e5ca2aa6eacb3f9beb94825",
+        "exact_solution_count": 410,
+        "independent_replay_cap": 411,
+        "ordered_solution_set_sha256": "efb38abd66979aca03d1aba9f5adc9fccdb408922db8ee51a2295012be218883"
+      },
+      "generation": {
+        "root_solutions": 410,
+        "moves_per_target": 1135,
+        "raw_attempts": 465350,
+        "radius_rejections": 234930,
+        "coverage_rejections": 3821,
+        "accepted_observations": 226599,
+        "distinct_canonical_networks": 734,
+        "duplicate_observations": 225865,
+        "summed_network_occurrences": 226599,
+        "ordered_key_set_sha256": "5b7895c2ced339b0a6bc4d7f5ac05b2fa8274a9169f927d354c3273fa177a1a1",
+        "generation_invariant_sha256": "1e5c37b37da33959c85258b4d0bbb13e9ffde8ccd3151513b2d0e33e96704bc7"
+      },
+      "classification": {
+        "count_cap": 129,
+        "external_root_cache_hits": 1,
+        "frozen_seed_cache_hits": 1,
+        "direct_count_calls": 732,
+        "exact_networks": 2,
+        "lower_bound_networks": 732,
+        "unclassified": 0,
+        "exact_counts": [410, 605],
+        "lower_bound_count": 129,
+        "unique_network_sha256": null
+      },
+      "solver_totals": {
+        "calls": 805,
+        "nodes": 274711,
+        "branches": 142347,
+        "propagation_rounds": 4419137,
+        "comparison_revisions": 83122,
+        "max_depth": 35
+      }
+    }
+  ],
+  "encodings": {
+    "ordered_solution_set_sha256": "lexicographically sorted complete grids concatenated as 81 numeric u8 bytes 0x01..0x09 per grid, with no prefix",
+    "ordered_key_set_sha256": "canonical Hasse keys in exact BTree order; each u32 little-endian edge count followed by lower,upper u8 bytes",
+    "generation_invariant_sha256": "SHA-256 of ASCII thermo-18c-radius1-generation-audit-v1 plus NUL, followed by compact UTF-8 JSON with recursively sorted object keys; the array follows artifact network order and retains network_sha256, hasse_edges, canonical_cells, representative_full_saturated_edges, representative_target, representative_state_sha256, representative_origin, observed_target_ordinals, occurrences, preexisting_seed_ordinal, classification_source, and is_declared_root",
+    "union_key_score_sha256": "union keys in exact BTree order; ordered-key entry followed by count u64 big-endian, exact byte 0 or 1, and cap u64 big-endian"
+  },
+  "combined": {
+    "artifact_count": 2,
+    "canonical_key_instances": 1468,
+    "distinct_canonical_networks": 1431,
+    "membership_histogram": {
+      "1": 1394,
+      "2": 37
+    },
+    "intersection_count": 37,
+    "intersection_key_set_sha256": "ebd93ceecc64065b64d00c772d2b66b179376e8b324020c63509de207fefd971",
+    "union_key_set_sha256": "16db25a285260012c9d819df1a893fe906b576b435c43dde12bcea6a93a9e433",
+    "union_key_score_sha256": "2e00b5039de7f903e179e89a8046d574d04f9577acdef096bbb2b99db626542f",
+    "overlap_core_identity_and_scores_agree": true,
+    "overlap_representative_targets_differ": 37,
+    "classification": {
+      "exact_networks": 4,
+      "lower_bound_networks": 1427,
+      "unclassified": 0,
+      "exact_counts": [304, 410, 514, 605],
+      "lower_bound_count": 129
+    },
+    "generation_instances": {
+      "raw_attempts": 810390,
+      "radius_rejections": 403650,
+      "coverage_rejections": 6227,
+      "accepted_observations": 400513,
+      "duplicate_observations_within_artifacts": 399045
+    },
+    "solver_totals": {
+      "calls": 1610,
+      "nodes": 547919,
+      "branches": 283968,
+      "propagation_rounds": 8764545,
+      "comparison_revisions": 162097,
+      "max_depth": 36
+    }
+  },
+  "audit": {
+    "source_whole_file_sha256_pins_verified": true,
+    "source_schema_completion_count_and_selected_exact_state_verified": true,
+    "external_root_counted_independently_to_n_plus_1": true,
+    "external_root_complete_solution_sets_independently_enumerated": true,
+    "all_artifact_network_identities_and_score_relations_verified": true,
+    "all_representative_origins_independently_replayed_through_saturation_hasse_reduction_and_d4_complement_canonicalization": 1468,
+    "conservation_and_solver_call_partitions_verified": true,
+    "root_304_cap2_smoke": {
+      "path": "runs/18c-root-304-radius1-cap2-loader-smoke-v2.jsonl",
+      "bytes": 1726440,
+      "sha256": "7beb743e2f195440c56ffe6d0d7655da33d52d4362dd325354f7bf8c8ab8ef8d",
+      "production_generation_fields_identical": true
+    },
+    "cli_missing_pin_wrong_pin_mode_isolation_and_no_clobber_rejections_verified": true
+  },
+  "conclusion": {
+    "scope": "the complete all-solution saturated radius-one neighborhoods generated from the exact 304- and 410-solution roots under retarget and one-cell replacement moves",
+    "no_unique_in_scope": true,
+    "no_solution_count_below_129_in_scope": true,
+    "no_improvement_over_the_128_solution_incumbent_in_scope": true,
+    "best_exact_count_in_scope": 304,
+    "count_129_records_are_lower_bounds_not_exact_counts": true,
+    "global_18c_exhaustive": false,
+    "global_negative_result_proved": false
+  }
+}

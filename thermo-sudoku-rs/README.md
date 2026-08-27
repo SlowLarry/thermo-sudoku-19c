@@ -129,9 +129,16 @@ for independent checking.
 | `thermo-17c-three-path` | Exact scan of all ten cell-disjoint three-path partitions of 17. |
 | `thermo-17c-maximal` | Merge-maximal disjoint-path scan for the remaining path layers. |
 | `thermo-17c-overlap` | Exact saturated-network scan for all generalized 17-cell inequalities. |
+| `thermo-18c-seed-harvest` | Deterministic saturated 18-cell seed construction from verified `9+8+2` parents. |
+| `thermo-18c-beam` | Bounded deterministic beam rounds, exact all-solutions radius-one root searches, and sharded exact two-cell exchanges around frozen seed 42. |
 | `thermo-fixed-target` | Fixed-solution comparison hitting-set experiment. |
 | `thermo-global-cegis` | Target-free comparison-set CEGIS experiment. |
 | `thermo-topology-cnf` | SAT encoding and persistent CEGIS for cell-disjoint path topology. |
+
+Generalized 18-cell methods are specified in the
+[beam-search](../analysis/18c-beam-search.md),
+[exact root-neighbourhood](../analysis/18c-root-neighborhood.md), and
+[seed-42 two-cell-shell](../analysis/18c-root-two-cell-shell.md) notes.
 
 Run the current generalized scanner through the validated chunk runner:
 

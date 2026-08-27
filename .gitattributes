@@ -1,0 +1,9 @@
+# Keep content-addressed constructive-search inputs and summaries byte-stable.
+/sources/min_thermos_9_8_2.txt text eol=crlf
+/analysis/18c-seeds-v1.jsonl text eol=lf
+/analysis/18c-beam-round1-landscape4096-v1-summary.json text eol=lf
+/analysis/18c-beam-round2-landscape4096-v1-summary.json text eol=lf
+/analysis/18c-descents304-410-radius1-cap129-summary.json text eol=lf
+/analysis/18c-frozen71-radius1-cap4096-summary.json text eol=lf
+/analysis/18c-generated138-radius1-cap129-summary.json text eol=lf
+/analysis/18c-root-seed-42-shell2-cap129-summary.json text eol=lf
