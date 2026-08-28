@@ -657,7 +657,8 @@ const ALL_HOUSES: u32 = (1u32 << 27) - 1;
 /// exceeded 10,000 nodes, so the change is inert on all but a handful.
 const RESTART_BASE_BUDGET: u64 = 10_000;
 
-/// Perturbed attempts tried before falling back to an unbounded search.
+/// Bounded attempts, including the initial identity-order attempt, before the
+/// final unbounded identity-order fallback.
 ///
 /// The unbounded fallback, not the schedule, is what makes the procedure
 /// complete and terminating, and it also bounds the regression: an instance no
@@ -1124,6 +1125,15 @@ impl Solver {
     }
 
     fn count_up_to_internal(&self, limit: u64, capture_solutions: bool) -> SolveResult {
+        self.count_up_to_internal_with_restart_base(limit, capture_solutions, RESTART_BASE_BUDGET)
+    }
+
+    fn count_up_to_internal_with_restart_base(
+        &self,
+        limit: u64,
+        capture_solutions: bool,
+        restart_base_budget: u64,
+    ) -> SolveResult {
         assert!(
             limit >= 2,
             "solution limit must be at least two to classify 0 / 1 / 2+"
@@ -1150,7 +1160,7 @@ impl Solver {
             let options = SearchOptions {
                 limit,
                 capture_solutions,
-                node_budget: restart_budget(attempt),
+                node_budget: restart_budget_with_base(attempt, restart_base_budget),
             };
             let complete = self.search(state, work, options, 0, &mut result, &mut cell_order);
             merge_stats(&mut spent, &result.stats);
@@ -1205,11 +1215,11 @@ impl Solver {
         if result.count >= options.limit {
             return true;
         }
-        result.stats.nodes += 1;
-        result.stats.max_depth = result.stats.max_depth.max(depth);
-        if result.stats.nodes > options.node_budget {
+        if result.stats.nodes >= options.node_budget {
             return false;
         }
+        result.stats.nodes += 1;
+        result.stats.max_depth = result.stats.max_depth.max(depth);
         if !self.propagate(&mut state, &mut work, &mut result.stats) {
             return true;
         }
@@ -2364,11 +2374,16 @@ fn luby(index: u32) -> u64 {
 
 /// Node budget for one restart attempt, or `u64::MAX` for the final unbounded
 /// attempt that guarantees the search terminates with a complete answer.
+#[cfg(test)]
 fn restart_budget(attempt: u32) -> u64 {
+    restart_budget_with_base(attempt, RESTART_BASE_BUDGET)
+}
+
+fn restart_budget_with_base(attempt: u32, base_budget: u64) -> u64 {
     if attempt >= RESTART_ATTEMPTS {
         u64::MAX
     } else {
-        RESTART_BASE_BUDGET.saturating_mul(luby(attempt))
+        base_budget.saturating_mul(luby(attempt))
     }
 }
 
@@ -2382,11 +2397,13 @@ fn splitmix64(state: &mut u64) -> u64 {
 
 /// Branch-scan order for one restart attempt.
 ///
-/// Attempt zero is the identity, which is what makes a search that fits in the
-/// first budget bit-for-bit unchanged. Later attempts shuffle it, and that
-/// shuffle is the entire mechanism: `choose_branch_cell` uses this order only to
-/// break ties between equally constrained cells, so permuting it steers the
-/// search away from a barren subtree without altering which solutions exist.
+/// Attempt zero and the final unbounded fallback use the identity order. This
+/// makes a search that fits in the first budget bit-for-bit unchanged and bounds
+/// the worst-case regression by the finite restart prefix plus the old search.
+/// Bounded intermediate attempts shuffle the order; `choose_branch_cell` uses
+/// it only to break ties between equally constrained cells, so permuting it
+/// steers the search away from a barren subtree without altering which
+/// solutions exist.
 ///
 /// That the scan order is the only lever was established by relabelling
 /// pathological instances with the grid's dihedral symmetries, which leave the
@@ -2395,7 +2412,7 @@ fn splitmix64(state: &mut u64) -> u64 {
 /// instances that each cost over 3.5 billion nodes, 26 finished in 31 to 42.
 fn restart_cell_order(attempt: u32) -> [u8; 81] {
     let mut order: [u8; 81] = std::array::from_fn(|cell| cell as u8);
-    if attempt == 0 {
+    if attempt == 0 || attempt >= RESTART_ATTEMPTS {
         return order;
     }
     let mut state = RESTART_SEED ^ u64::from(attempt).wrapping_mul(0x9e37_79b9_7f4a_7c15);
@@ -3514,6 +3531,28 @@ mod restart_tests {
         ]
     }
 
+    fn exact_719_comparisons() -> Vec<(u8, u8)> {
+        vec![
+            (2, 3),
+            (3, 4),
+            (4, 12),
+            (11, 2),
+            (19, 20),
+            (20, 11),
+            (28, 19),
+            (28, 29),
+            (29, 20),
+            (43, 44),
+            (52, 43),
+            (53, 52),
+            (60, 68),
+            (61, 53),
+            (68, 77),
+            (69, 61),
+            (77, 69),
+        ]
+    }
+
     fn digits(text: &str) -> [u8; 81] {
         std::array::from_fn(|cell| text.as_bytes()[cell] - b'0')
     }
@@ -3543,16 +3582,18 @@ mod restart_tests {
     }
 
     #[test]
-    fn the_first_attempt_is_the_identity_order_and_later_ones_are_permutations() {
+    fn bounded_restarts_are_permutations_and_the_fallback_restores_identity() {
         let identity: [u8; 81] = std::array::from_fn(|cell| cell as u8);
         assert_eq!(restart_cell_order(0), identity);
-        for attempt in 1..=RESTART_ATTEMPTS {
+        for attempt in 1..RESTART_ATTEMPTS {
             let order = restart_cell_order(attempt);
             let mut seen = order;
             seen.sort_unstable();
             assert_eq!(seen, identity, "attempt {attempt} is not a permutation");
             assert_ne!(order, identity, "attempt {attempt} did not perturb");
         }
+        assert_eq!(restart_cell_order(RESTART_ATTEMPTS), identity);
+        assert_eq!(restart_cell_order(RESTART_ATTEMPTS + 1), identity);
     }
 
     #[test]
@@ -3678,15 +3719,12 @@ mod restart_tests {
         assert_eq!(result.second_solution, None);
     }
 
-    /// A truncated attempt must never be mistaken for an answer. Driving the
-    /// budget to one node forces every attempt but the last to be cut off, so
-    /// only the unbounded fallback can produce the result -- and it must still
-    /// be the right one.
+    /// A truncated attempt must explicitly report that its partial state is not
+    /// an answer. The outer restart loop is exercised separately below.
     #[test]
-    fn a_budget_that_truncates_every_bounded_attempt_still_answers_correctly() {
+    fn a_one_node_attempt_reports_truncation() {
         let comparisons = pathological_comparisons();
         let solver = Solver::blank_comparisons(&comparisons).unwrap();
-        let reference = solver.count_up_to(2);
 
         let Some((state, work)) = solver.initial_search_state() else {
             panic!("the instance is satisfiable");
@@ -3712,10 +3750,32 @@ mod restart_tests {
             &mut cell_order,
         );
         assert!(!complete, "a one-node budget must report truncation");
+        assert_eq!(truncated.stats.nodes, 1);
+    }
+
+    /// Force all bounded attempts to truncate, then require the identity-order
+    /// fallback to exhaust a high-cap search. This covers the exact-count path
+    /// used by the 18-cell gradient search, not only cap-two multiplicity.
+    #[test]
+    fn exact_high_cap_count_survives_restarts_and_identity_fallback() {
+        let solver = Solver::blank_comparisons(&exact_719_comparisons()).unwrap();
+        let reference = solver.count_up_to_internal_with_restart_base(720, true, u64::MAX);
+        let restarted = solver.count_up_to_internal_with_restart_base(720, true, 1);
+
+        assert_eq!(reference.count, 719);
+        assert!(!reference.capped);
+        assert_eq!(restarted.count, reference.count);
+        assert_eq!(restarted.capped, reference.capped);
+        assert_eq!(restarted.first_solution, reference.first_solution);
+        assert_eq!(restarted.second_solution, reference.second_solution);
+
+        let bounded_prefix: u64 = (0..RESTART_ATTEMPTS)
+            .map(|attempt| restart_budget_with_base(attempt, 1))
+            .sum();
+        assert_eq!(bounded_prefix, 33);
         assert_eq!(
-            reference.count, 2,
-            "the restart loop still reaches the answer"
+            restarted.stats.nodes,
+            reference.stats.nodes + bounded_prefix
         );
-        assert!(reference.capped);
     }
 }
