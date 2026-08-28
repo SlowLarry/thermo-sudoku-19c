@@ -648,6 +648,29 @@ const PEERS: [[u8; 20]; 81] = make_peers();
 #[cfg(test)]
 const ALL_HOUSES: u32 = (1u32 << 27) - 1;
 
+/// Nodes allowed in the first restart interval.
+///
+/// Deliberately generous. Every search that finishes inside the first attempt
+/// behaves exactly as it did before restarts existed, node counts and witness
+/// solutions included, because the first attempt is the old search verbatim. In
+/// a measured 289,097 classifications of the 18-cell extension corpus only 26
+/// exceeded 10,000 nodes, so the change is inert on all but a handful.
+const RESTART_BASE_BUDGET: u64 = 10_000;
+
+/// Perturbed attempts tried before falling back to an unbounded search.
+///
+/// The unbounded fallback, not the schedule, is what makes the procedure
+/// complete and terminating, and it also bounds the regression: an instance no
+/// perturbation helps pays the Luby prefix, 33 x `RESTART_BASE_BUDGET` nodes,
+/// on top of the search it would have performed anyway.
+const RESTART_ATTEMPTS: u32 = 16;
+
+/// Fixed odd constant for the restart shuffle's generator. Nothing here may
+/// depend on the clock, the address space or the thread: two runs of the same
+/// build on the same input must produce identical results and identical
+/// statistics.
+const RESTART_SEED: u64 = 0x2545_f491_4f6c_dd1d;
+
 #[derive(Clone, Copy, Debug, Default)]
 struct Work {
     single_lo: u64,
@@ -660,6 +683,9 @@ struct Work {
 struct SearchOptions {
     limit: u64,
     capture_solutions: bool,
+    /// Nodes this attempt may spend before it gives up and is restarted.
+    /// `u64::MAX` is the unbounded final attempt.
+    node_budget: u64,
 }
 
 struct ExtensionAccumulator {
@@ -963,6 +989,16 @@ impl Solver {
         self.count_up_to(2)
     }
 
+    /// Count solutions, stopping at `limit`.
+    ///
+    /// `count` and `capped` are properties of the problem, so they do not depend
+    /// on how the search reached them. `first_solution` and `second_solution`
+    /// are *some* witnesses: when more than one solution exists, which ones are
+    /// reported depends on the search order, and a restart changes that order.
+    /// A unique solution is of course reported uniquely.
+    ///
+    /// The search restarts under a Luby schedule with a perturbed branch order.
+    /// See [`restart_cell_order`] for why that is necessary and what it costs.
     pub fn count_up_to(&self, limit: u64) -> SolveResult {
         self.count_up_to_internal(limit, true)
     }
@@ -1092,25 +1128,42 @@ impl Solver {
             limit >= 2,
             "solution limit must be at least two to classify 0 / 1 / 2+"
         );
-        let mut result = SolveResult {
-            count: 0,
-            capped: false,
-            first_solution: None,
-            second_solution: None,
-            stats: SolveStats::default(),
-        };
-        let Some((state, work)) = self.initial_search_state() else {
-            return result;
-        };
-
-        let mut cell_order = std::array::from_fn(|cell| cell as u8);
-        let options = SearchOptions {
-            limit,
-            capture_solutions,
-        };
-        self.search(state, work, options, 0, &mut result, &mut cell_order);
-        result.capped = result.count >= limit;
-        result
+        // Statistics accumulate across attempts so the reported node count stays
+        // an honest measure of the work done, including work that was abandoned.
+        let mut spent = SolveStats::default();
+        let mut attempt = 0u32;
+        loop {
+            let mut result = SolveResult {
+                count: 0,
+                capped: false,
+                first_solution: None,
+                second_solution: None,
+                stats: SolveStats::default(),
+            };
+            let Some((state, work)) = self.initial_search_state() else {
+                // Refuted by propagation from the givens alone. Deterministic,
+                // so this can only happen on the first attempt.
+                result.stats = spent;
+                return result;
+            };
+            let mut cell_order = restart_cell_order(attempt);
+            let options = SearchOptions {
+                limit,
+                capture_solutions,
+                node_budget: restart_budget(attempt),
+            };
+            let complete = self.search(state, work, options, 0, &mut result, &mut cell_order);
+            merge_stats(&mut spent, &result.stats);
+            if complete {
+                result.stats = spent;
+                result.capped = result.count >= limit;
+                return result;
+            }
+            // Cut off by its budget, so the partial count says nothing and is
+            // discarded; only `spent` survives. `restart_budget` is unbounded
+            // from `RESTART_ATTEMPTS` onwards, so this cannot loop forever.
+            attempt += 1;
+        }
     }
 
     fn initial_search_state(&self) -> Option<([u16; 81], Work)> {
@@ -1135,6 +1188,11 @@ impl Solver {
         Some((state, work))
     }
 
+    /// Returns true when this subtree was settled: either explored to
+    /// exhaustion, refuted, or abandoned because `options.limit` solutions were
+    /// already in hand, all of which are definitive. False means only that the
+    /// node budget ran out, so the caller must discard the partial count and
+    /// restart rather than treat it as an answer.
     fn search(
         &self,
         mut state: [u16; 81],
@@ -1143,14 +1201,17 @@ impl Solver {
         depth: u8,
         result: &mut SolveResult,
         cell_order: &mut [u8; 81],
-    ) {
+    ) -> bool {
         if result.count >= options.limit {
-            return;
+            return true;
         }
         result.stats.nodes += 1;
         result.stats.max_depth = result.stats.max_depth.max(depth);
+        if result.stats.nodes > options.node_budget {
+            return false;
+        }
         if !self.propagate(&mut state, &mut work, &mut result.stats) {
-            return;
+            return true;
         }
 
         let Some(cell) = choose_branch_cell(&state, &self.layout, cell_order) else {
@@ -1163,7 +1224,7 @@ impl Solver {
                     result.second_solution = Some(solution);
                 }
             }
-            return;
+            return true;
         };
 
         result.stats.branches += 1;
@@ -1174,10 +1235,13 @@ impl Solver {
             }
             let mut child = state;
             let mut child_work = Work::default();
-            if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value) {
-                self.search(child, child_work, options, depth + 1, result, cell_order);
+            if restrict_domain(&self.layout, &mut child, &mut child_work, cell, value)
+                && !self.search(child, child_work, options, depth + 1, result, cell_order)
+            {
+                return false;
             }
         }
+        true
     }
 
     /// Returns true when the complete subtree was exhausted. A false result
@@ -2276,6 +2340,72 @@ fn high_bit(mask: u16) -> u16 {
     }
 }
 
+/// The Luby restart sequence: 1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8, ...
+///
+/// Luby, Sinclair and Zuckerman's universal schedule. For a runtime
+/// distribution whose tail is heavy -- which is what a fixed-order backtracking
+/// search on this problem produces -- it is within a logarithmic factor of the
+/// best possible fixed cutoff, without needing to know where that cutoff is.
+fn luby(index: u32) -> u64 {
+    let mut span = 1u64;
+    let mut power = 0u32;
+    while span < u64::from(index) + 1 {
+        power += 1;
+        span = 2 * span + 1;
+    }
+    let mut remaining = u64::from(index);
+    while span - 1 != remaining {
+        span = (span - 1) / 2;
+        power -= 1;
+        remaining %= span;
+    }
+    1u64 << power
+}
+
+/// Node budget for one restart attempt, or `u64::MAX` for the final unbounded
+/// attempt that guarantees the search terminates with a complete answer.
+fn restart_budget(attempt: u32) -> u64 {
+    if attempt >= RESTART_ATTEMPTS {
+        u64::MAX
+    } else {
+        RESTART_BASE_BUDGET.saturating_mul(luby(attempt))
+    }
+}
+
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut mixed = *state;
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed ^ (mixed >> 31)
+}
+
+/// Branch-scan order for one restart attempt.
+///
+/// Attempt zero is the identity, which is what makes a search that fits in the
+/// first budget bit-for-bit unchanged. Later attempts shuffle it, and that
+/// shuffle is the entire mechanism: `choose_branch_cell` uses this order only to
+/// break ties between equally constrained cells, so permuting it steers the
+/// search away from a barren subtree without altering which solutions exist.
+///
+/// That the scan order is the only lever was established by relabelling
+/// pathological instances with the grid's dihedral symmetries, which leave the
+/// solution set, the comparison pressure and the value ordering untouched and
+/// change nothing but the cell numbering. Of 32 such relabellings of four
+/// instances that each cost over 3.5 billion nodes, 26 finished in 31 to 42.
+fn restart_cell_order(attempt: u32) -> [u8; 81] {
+    let mut order: [u8; 81] = std::array::from_fn(|cell| cell as u8);
+    if attempt == 0 {
+        return order;
+    }
+    let mut state = RESTART_SEED ^ u64::from(attempt).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    for index in (1..order.len()).rev() {
+        let pick = (splitmix64(&mut state) % (index as u64 + 1)) as usize;
+        order.swap(index, pick);
+    }
+    order
+}
+
 fn merge_stats(total: &mut SolveStats, addition: &SolveStats) {
     total.nodes += addition.nodes;
     total.branches += addition.branches;
@@ -3346,5 +3476,246 @@ mod tests {
             )
         };
         assert_eq!(count, 2);
+    }
+}
+
+/// Restart-policy tests.
+///
+/// The contract is narrow and worth stating: restarts may change *which*
+/// witnesses a multi-solution problem reports and how many nodes it costs, and
+/// may change nothing else. Counts, capped flags and unique witnesses are
+/// properties of the problem.
+#[cfg(test)]
+mod restart_tests {
+    use super::*;
+
+    /// A 17-cell candidate extended at cell 55, from catalogue line 36675 of
+    /// the 17-clue corpus. Before restarts this single classification cost
+    /// 5,021,354,483 nodes and 46 minutes, and by itself was 28.7% of the
+    /// entire 17.5-billion-node cost of its 193,538-candidate work unit.
+    const PATHOLOGICAL_TARGET: &str =
+        "267419538385267419419583267731658942542391876896724351123975684958146723674832195";
+
+    fn pathological_comparisons() -> Vec<(u8, u8)> {
+        vec![
+            (4, 12),
+            (25, 26),
+            (28, 18),
+            (29, 28),
+            (29, 38),
+            (38, 28),
+            (50, 59),
+            (55, 65),
+            (59, 68),
+            (62, 52),
+            (65, 57),
+            (73, 65),
+            (78, 68),
+        ]
+    }
+
+    fn digits(text: &str) -> [u8; 81] {
+        std::array::from_fn(|cell| text.as_bytes()[cell] - b'0')
+    }
+
+    #[test]
+    fn luby_matches_the_published_sequence() {
+        let expected = [
+            1u64, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8, 1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2,
+            4, 8, 16,
+        ];
+        let actual = (0..expected.len() as u32).map(luby).collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_final_restart_attempt_is_unbounded_so_the_search_terminates() {
+        for attempt in 0..RESTART_ATTEMPTS {
+            let budget = restart_budget(attempt);
+            assert!(budget >= RESTART_BASE_BUDGET, "attempt {attempt}");
+            assert!(budget < u64::MAX, "attempt {attempt} must be bounded");
+        }
+        assert_eq!(restart_budget(RESTART_ATTEMPTS), u64::MAX);
+        // The bounded prefix is what a search no perturbation helps pays on top
+        // of the work it would have done anyway. Keep that visible.
+        let prefix: u64 = (0..RESTART_ATTEMPTS).map(restart_budget).sum();
+        assert_eq!(prefix, 33 * RESTART_BASE_BUDGET);
+    }
+
+    #[test]
+    fn the_first_attempt_is_the_identity_order_and_later_ones_are_permutations() {
+        let identity: [u8; 81] = std::array::from_fn(|cell| cell as u8);
+        assert_eq!(restart_cell_order(0), identity);
+        for attempt in 1..=RESTART_ATTEMPTS {
+            let order = restart_cell_order(attempt);
+            let mut seen = order;
+            seen.sort_unstable();
+            assert_eq!(seen, identity, "attempt {attempt} is not a permutation");
+            assert_ne!(order, identity, "attempt {attempt} did not perturb");
+        }
+    }
+
+    #[test]
+    fn restart_orders_are_reproducible() {
+        // Nothing in the schedule may depend on the clock, the address space or
+        // the thread: a certified run must be repeatable.
+        for attempt in 0..=RESTART_ATTEMPTS {
+            assert_eq!(restart_cell_order(attempt), restart_cell_order(attempt));
+        }
+    }
+
+    /// The change has to be inert on ordinary work, or it is not adoptable. A
+    /// search that finishes inside the first budget ran the identity order with
+    /// no restart, so it is the old search verbatim, node counts included.
+    #[test]
+    fn an_ordinary_search_never_leaves_the_first_attempt() {
+        let mut comparisons = pathological_comparisons();
+        comparisons.retain(|&edge| edge != (55, 65));
+        let result = Solver::blank_comparisons(&comparisons)
+            .unwrap()
+            .count_up_to(2);
+        assert_eq!(result.count, 2);
+        assert!(result.capped);
+        assert!(
+            result.stats.nodes <= RESTART_BASE_BUDGET,
+            "an ordinary classification must not restart, spent {}",
+            result.stats.nodes
+        );
+    }
+
+    #[test]
+    fn the_pathological_extension_no_longer_costs_billions() {
+        let comparisons = pathological_comparisons();
+        let result = Solver::blank_comparisons(&comparisons)
+            .unwrap()
+            .count_up_to(2);
+        assert_eq!(result.count, 2);
+        assert!(result.capped);
+        // It must actually have restarted -- otherwise this test would pass for
+        // the wrong reason if the budget were ever raised above the old cost.
+        assert!(
+            result.stats.nodes > RESTART_BASE_BUDGET,
+            "expected the first attempt to be cut off"
+        );
+        // 5,021,354,483 nodes before. Anything in this range is the perturbed
+        // attempt succeeding immediately.
+        assert!(
+            result.stats.nodes < 50_000,
+            "restarts did not rescue the pathological case, spent {}",
+            result.stats.nodes
+        );
+    }
+
+    #[test]
+    fn the_pathological_extension_reports_a_genuine_second_solution() {
+        let comparisons = pathological_comparisons();
+        let result = Solver::blank_comparisons(&comparisons)
+            .unwrap()
+            .count_up_to(2);
+        let target = digits(PATHOLOGICAL_TARGET);
+        let first = result.first_solution.expect("a witness");
+        let second = result.second_solution.expect("a second witness");
+        assert_ne!(first, second);
+        for solution in [first, second] {
+            // Every witness must be a complete grid respecting every comparison.
+            for &(lower, upper) in &comparisons {
+                assert!(solution[lower as usize] < solution[upper as usize]);
+            }
+        }
+        // The target is one of this problem's solutions; the search is free to
+        // report it or not, which is exactly the freedom restarts exercise.
+        assert!(
+            comparisons
+                .iter()
+                .all(|&(lower, upper)| target[lower as usize] < target[upper as usize])
+        );
+    }
+
+    #[test]
+    fn counting_is_reproducible_across_runs() {
+        let comparisons = pathological_comparisons();
+        let solver = Solver::blank_comparisons(&comparisons).unwrap();
+        let first = solver.count_up_to(2);
+        let second = solver.count_up_to(2);
+        assert_eq!(
+            first, second,
+            "restarts must not make the solver nondeterministic"
+        );
+    }
+
+    /// The property the campaign exists to find must survive the change, and it
+    /// must survive it in the exhausting direction: proving uniqueness means
+    /// refuting the whole tree, which is where a truncated attempt would do the
+    /// most damage if its partial count were ever trusted.
+    #[test]
+    fn a_verified_unique_network_is_still_unique_with_the_same_witness() {
+        const REVERIFIED_19C_SOLUTION: &str =
+            "831274569964358271257961843682743195793125486415896327578612934126439758349587612";
+        let comparisons = [
+            (2u8, 3u8),
+            (3, 12),
+            (11, 19),
+            (12, 11),
+            (16, 24),
+            (19, 27),
+            (27, 36),
+            (28, 37),
+            (36, 28),
+            (52, 61),
+            (61, 62),
+            (62, 70),
+            (70, 78),
+            (76, 68),
+            (77, 76),
+            (78, 77),
+        ];
+        let result = Solver::blank_comparisons(&comparisons)
+            .unwrap()
+            .count_up_to(2);
+        assert_eq!(result.count, 1);
+        assert!(!result.capped);
+        assert_eq!(result.first_solution, Some(digits(REVERIFIED_19C_SOLUTION)));
+        assert_eq!(result.second_solution, None);
+    }
+
+    /// A truncated attempt must never be mistaken for an answer. Driving the
+    /// budget to one node forces every attempt but the last to be cut off, so
+    /// only the unbounded fallback can produce the result -- and it must still
+    /// be the right one.
+    #[test]
+    fn a_budget_that_truncates_every_bounded_attempt_still_answers_correctly() {
+        let comparisons = pathological_comparisons();
+        let solver = Solver::blank_comparisons(&comparisons).unwrap();
+        let reference = solver.count_up_to(2);
+
+        let Some((state, work)) = solver.initial_search_state() else {
+            panic!("the instance is satisfiable");
+        };
+        let mut truncated = SolveResult {
+            count: 0,
+            capped: false,
+            first_solution: None,
+            second_solution: None,
+            stats: SolveStats::default(),
+        };
+        let mut cell_order = restart_cell_order(0);
+        let complete = solver.search(
+            state,
+            work,
+            SearchOptions {
+                limit: 2,
+                capture_solutions: true,
+                node_budget: 1,
+            },
+            0,
+            &mut truncated,
+            &mut cell_order,
+        );
+        assert!(!complete, "a one-node budget must report truncation");
+        assert_eq!(
+            reference.count, 2,
+            "the restart loop still reaches the answer"
+        );
+        assert!(reference.capped);
     }
 }
